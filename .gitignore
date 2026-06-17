@@ -1,0 +1,8 @@
+# IDE
+.vs/
+
+# Build outputs
+build/
+out/
+bin/
+lib/

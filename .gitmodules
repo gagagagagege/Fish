@@ -7,3 +7,6 @@
 [submodule "Fish/vendor/imgui"]
 	path = Fish/vendor/imgui
 	url = https://github.com/ocornut/imgui
+[submodule "Fish/vendor/glm"]
+	path = Fish/vendor/glm
+	url = https://github.com/icaven/glm
