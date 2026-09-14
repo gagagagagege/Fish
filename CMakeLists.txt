@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CXX_EXTENSIONS False)
 
-# 统一输出目录，确保 Playground 的 exe 和 Fish 的 dll 输出到同一文件夹，方便运行
+# 统一输出目录，确保 Playground 的 exe 和 Fish 的 lib 输出到同一文件夹，方便运行
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
@@ -56,30 +56,36 @@ target_include_directories(glad PUBLIC
 )
 
 # =========================================================
-# 2. Fish 动态库项目
+# 2. Fish 静态库项目
 # =========================================================
-file(GLOB_RECURSE FISH_SOURCES 
+file(GLOB_RECURSE FISH_SOURCES
     "Fish/src/*.h"
     "Fish/src/*.cpp"
 )
 
-add_library(Fish SHARED ${FISH_SOURCES})
+add_library(Fish STATIC ${FISH_SOURCES})
 
-# 设置包含目录：指向 Fish/src
-target_include_directories(Fish PUBLIC 
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Fish/src>
+# 将 stb_image 的两个文件直接作为 Fish 的源文件
+target_sources(Fish PRIVATE
+    Fish/vendor/stb_image/stb_image.h
+    Fish/vendor/stb_image/stb_image.cpp
 )
 
-# 编译动态库时的宏定义
-target_compile_definitions(Fish PRIVATE 
-                                  FS_BUILD_DLL
-                                  GLFW_INCLUDE_NONE
-                                                     )
+# 设置包含目录
+target_include_directories(Fish PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Fish/src>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Fish/vendor/stb_image>
+)
+
+target_compile_definitions(Fish PRIVATE GLFW_INCLUDE_NONE)
 
 # 当在 Windows 上编译时，定义 FS_PLATFORM_WINDOWS，公开使得链接的 Playground 也继承该宏
 if(WIN32)
     target_compile_definitions(Fish PUBLIC FS_PLATFORM_WINDOWS)
 endif()
+
+# Debug 模式下启用断言
+target_compile_definitions(Fish PUBLIC $<$<CONFIG:Debug>:FS_DEBUG>)
 
 # 设置预编译头 (CMake 3.16+)
 target_precompile_headers(Fish PRIVATE "Fish/src/fspch.h")
@@ -100,3 +106,8 @@ add_executable(Playground ${PLAYGROUND_SOURCES})
 
 # 链接 Fish 引擎项目
 target_link_libraries(Playground PRIVATE Fish)
+
+# 设置 VS 调试器工作目录为项目根目录，使相对路径（如 assets/）正确解析
+set_target_properties(Playground PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+)

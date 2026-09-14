@@ -1,8 +1,18 @@
 # IDE
 .vs/
+.vscode/
+.idea/
+*.user
+CMakeSettings.json
 
 # Build outputs
 build/
 out/
 bin/
 lib/
+
+# ImGui 运行时窗口布局，每次运行都会变
+imgui.ini
+
+# 截图
+截图/
