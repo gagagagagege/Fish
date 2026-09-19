@@ -3,7 +3,9 @@ cmake_minimum_required(VERSION 3.16)
 project(FishEngine C CXX)
 
 # 设置 C++ 标准
-set(CMAKE_CXX_STANDARD 17)
+# 20 是 Vulkan 后端的要求（Fish/src/Platform/Vulkan 从 vulkan_project 搬来，
+# 那边是 C++20）。Fish 原有代码是 C++17，向下兼容，不用改。
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CXX_EXTENSIONS False)
 
@@ -55,6 +57,17 @@ target_include_directories(glad PUBLIC
     Fish/vendor/GLAD/include
 )
 
+# ---- Vulkan SDK ----
+# Fish/src/Platform/Vulkan 需要它。默认指向本机安装位置，
+# 别的机器上用 -DVulkan_ROOT=<路径> 覆盖。
+if(NOT DEFINED Vulkan_ROOT)
+    set(Vulkan_ROOT "D:/Vulkan_SDK" CACHE PATH "Vulkan SDK 安装目录")
+endif()
+find_package(Vulkan REQUIRED)
+
+# GLFW 的 vulkan.c 要 Vulkan 头文件
+target_include_directories(glfw PRIVATE ${Vulkan_INCLUDE_DIRS})
+
 # =========================================================
 # 2. Fish 静态库项目
 # =========================================================
@@ -92,6 +105,23 @@ target_precompile_headers(Fish PRIVATE "Fish/src/fspch.h")
 
 # 链接。PUBLIC会让链接Fish的Playground也能找到它们。
 target_link_libraries(Fish PUBLIC spdlog::spdlog glfw glad imgui glm::glm)
+
+# ---- Vulkan 后端（Fish/src/Platform/Vulkan）----
+# 定义与 vulkan_project/CMakeLists.txt:82-91 对齐。其中最后一条关键：
+# 不定义的话，vk::raii 的 acquireNextImage / presentKHR 遇到
+# VK_ERROR_OUT_OF_DATE_KHR 会直接抛异常，resize 会杀进程。
+target_link_libraries(Fish PUBLIC Vulkan::Vulkan)
+target_compile_definitions(Fish PRIVATE
+    VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+    VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
+    NOMINMAX
+    VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS=1
+    $<$<CONFIG:Debug>:DEBUG>        # VulkanValidationLayers.h 靠它开关验证层
+)
+if(MSVC)
+    # Platform/Vulkan 下是中文注释；不设这个，中文 locale 下会报 C4819
+    target_compile_options(Fish PRIVATE /utf-8)
+endif()
 
 
 # =========================================================

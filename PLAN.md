@@ -96,6 +96,10 @@
 | **M5** | `Renderer2D` 接进来 ← **核心交付** |
 | **M6** | ImGui |
 
+> **M2 的类名要另起。** 2026-09-19 搬源码时，`vkContext`（设备/队列/物理设备那个）
+> 连类名一起变成了 `VulkanContext` —— 这个名字已经被占了。M2 里继承 `GraphicsContext`
+> 的那个类得换个名字。
+
 **时间不够时的砍的顺序**：ECS → compute culling → indirect
 **底线**：bindless + Renderer2D
 
@@ -107,26 +111,43 @@
 **节奏**：每周留一天不排计划，用来补欠。
 **每周日**：花 15 分钟对一次计划，落后了就调整后面几周，不要硬扛。
 
-| 周 | 日期 | 项目主线 | 验收标准 |
-|---|---|---|---|
-| W1 | 09/14 – 09/20 | git 整理（两个仓库）、简历初稿、M1 开工 | 两仓库都有首次提交；`Buffer` 骨架能编译 |
-| W2 | 09/21 – 09/27 | **M1 完成** | vulkan_project 跑起来，旋转贴图四边形正常；6 个调用点全改成类构造；**开始投日常实习** |
-| W3 | 09/28 – 10/04 | Fish 开 `vulkan-backend` 分支；`VulkanContext` 骨架 | 空实现能编译链接 |
-| W4 | 10/05 – 10/11 | `VulkanContext` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 |
-| W5 | 10/12 – 10/18 | `VulkanRendererAPI : RendererAPI`；帧模型 | `BeginFrame/EndFrame` 跑通，每帧 clear |
-| W6 | 10/19 – 10/25 | 顶点/索引缓冲抽象；pipeline 创建 | 静态图形能画出来 |
-| W7 | 10/26 – 11/01 | **M3**；swapchain 重建接入 `onWindowResize` | **三角形走通 `Renderer::Submit`**；resize 不崩 |
-| W8 | 11/02 – 11/08 | `VulkanShader : Shader`；uniform / descriptor 抽象 | shader 和 uniform 走 Fish 的抽象 |
-| W9 | 11/09 – 11/15 | **M4**：`VulkanTexture2D : Texture2D` | 贴图四边形走 `Renderer::Submit` |
-| W10 | 11/16 – 11/22 | Renderer2D 设计（看 Hazel，**不抄**） | 设计草稿：顶点组织、批处理策略、flush 条件 |
-| W11 | 11/23 – 11/29 | Renderer2D 实现：攒 quad、flush、per-frame 顶点缓冲 | 单个 quad 能画出来 |
-| W12 | 11/30 – 12/06 | **M5：Renderer2D 完成** | 1000+ 精灵批处理、帧率稳定；**commit + push + 录 demo 截图** |
-| W13 | 12/07 – 12/13 | **弹性周**（补欠 / 提前调研 bindless） | 前面落后的在这里补齐 |
-| W14 | 12/14 – 12/20 | Bindless 描述符 | Renderer2D 突破 32 纹理槽限制 |
-| W15 | 12/21 – 12/27 | GPU-driven：indirect draw（**期末季，预期放低**） | |
-| W16 | 12/28 – 01/03 | GPU-driven：compute culling（**期末季，预期放低**） | draw 决策在 GPU 侧 |
-| W17 | 01/04 – 01/10 | 收尾：demo 视频、README、过程文档 | 三件套齐 |
-| W18 | 01/11 – 01/17 | 缓冲 + 提前批准备 | 简历定稿、内推已铺、项目讲解稿（3 分钟版 + 10 分钟版） |
+| 周 | 日期 | 项目主线 | 验收标准 | 状态 |
+|---|---|---|---|---|
+| W1 | 09/14 – 09/20 | git 整理（两个仓库）、简历初稿、M1 开工 | 两仓库都有首次提交；`Buffer` 骨架能编译 | ✅ 完成 |
+| W2 | 09/21 – 09/27 | **M1 完成** | vulkan_project 跑起来，旋转贴图四边形正常；6 个调用点全改成类构造；**开始投日常实习** | ✅ 完成 |
+| W3 | 09/28 – 10/04 | 源码搬进 `Fish/src/Platform/Vulkan/` + 加 `Vulkan` 前缀（✅ 提前做完）<br>分支 `vulkanAPI`（✅ 已有）<br>`VulkanContext` 骨架（⬜ 未做） | 空实现能编译链接 | 🔄 进行中 |
+| W4 | 10/05 – 10/11 | `VulkanContext` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 | ⬜ 未开始 |
+| W5 | 10/12 – 10/18 | `VulkanRendererAPI : RendererAPI`；帧模型 | `BeginFrame/EndFrame` 跑通，每帧 clear | ⬜ 未开始 |
+| W6 | 10/19 – 10/25 | 顶点/索引缓冲抽象；pipeline 创建 | 静态图形能画出来 | ⬜ 未开始 |
+| W7 | 10/26 – 11/01 | **M3**；swapchain 重建接入 `onWindowResize` | **三角形走通 `Renderer::Submit`**；resize 不崩 | ⬜ 未开始 |
+| W8 | 11/02 – 11/08 | `VulkanShader : Shader`；uniform / descriptor 抽象 | shader 和 uniform 走 Fish 的抽象 | ⬜ 未开始 |
+| W9 | 11/09 – 11/15 | **M4**：`VulkanTexture2D : Texture2D` | 贴图四边形走 `Renderer::Submit` | ⬜ 未开始 |
+| W10 | 11/16 – 11/22 | Renderer2D 设计（看 Hazel，**不抄**） | 设计草稿：顶点组织、批处理策略、flush 条件 | ⬜ 未开始 |
+| W11 | 11/23 – 11/29 | Renderer2D 实现：攒 quad、flush、per-frame 顶点缓冲 | 单个 quad 能画出来 | ⬜ 未开始 |
+| W12 | 11/30 – 12/06 | **M5：Renderer2D 完成** | 1000+ 精灵批处理、帧率稳定；**commit + push + 录 demo 截图** | ⬜ 未开始 |
+| W13 | 12/07 – 12/13 | **弹性周**（补欠 / 提前调研 bindless） | 前面落后的在这里补齐 | ⬜ 未开始 |
+| W14 | 12/14 – 12/20 | Bindless 描述符 | Renderer2D 突破 32 纹理槽限制 | ⬜ 未开始 |
+| W15 | 12/21 – 12/27 | GPU-driven：indirect draw（**期末季，预期放低**） | | ⬜ 未开始 |
+| W16 | 12/28 – 01/03 | GPU-driven：compute culling（**期末季，预期放低**） | draw 决策在 GPU 侧 | ⬜ 未开始 |
+| W17 | 01/04 – 01/10 | 收尾：demo 视频、README、过程文档 | 三件套齐 | ⬜ 未开始 |
+| W18 | 01/11 – 01/17 | 缓冲 + 提前批准备 | 简历定稿、内推已铺、项目讲解稿（3 分钟版 + 10 分钟版） | ⬜ 未开始 |
+
+> **进度更新 2026-09-19**（本文件是唯一一份；`D:\vulkan_project` 里那份已删）
+>
+> **W1 / W2 完成。W3 的「源码搬进 Fish」提前做了 —— 现在停在 W3 的「`VulkanContext` 骨架」之前。**
+>
+> W2 的「vulkan_project 跑起来」按 CLAUDE.md 的验证标准复核过：构建 0 错误 0 警告、
+> 12 秒墙钟烧 18.5 秒 CPU（渲染循环全速跑）、`WM_CLOSE` 退出 exit=0、stderr 0 字节。
+> **画面（旋转贴图四边形）我没有亲眼看过。**
+>
+> W3 的搬运：31 个文件进 `Fish/src/Platform/Vulkan/`（27 个源码 + `shaders/` `textures/`），
+> 除 `TriangleApp` 外都加了 `Vulkan` 前缀。构建 **0 错误 3 警告**，但那 3 条都在 Fish
+> 原有文件里（`OpenGLVertexArray.cpp:66`、`Renderer/Buffer.h:24`），**不是这次引入的** ——
+> 也就是说「0 警告」这条标准本来就达不到。`Playground` 10 秒墙钟烧 9.95 秒 CPU、
+> `WM_CLOSE` 干净退出、stderr 0 字节。
+> **搬进来的 Vulkan 代码目前全是死代码** —— 没有任何东西 new `TriangleApp`。
+>
+> 未确认的两项：W1 的「简历初稿」、W2 的「开始投日常实习」—— 这两件我这边没有任何依据。
 
 ### 关于 W15–W16（期末）
 
