@@ -115,7 +115,7 @@
 |---|---|---|---|---|
 | W1 | 09/14 – 09/20 | git 整理（两个仓库）、简历初稿、M1 开工 | 两仓库都有首次提交；`Buffer` 骨架能编译 | ✅ 完成 |
 | W2 | 09/21 – 09/27 | **M1 完成** | vulkan_project 跑起来，旋转贴图四边形正常；6 个调用点全改成类构造；**开始投日常实习** | ✅ 完成 |
-| W3 | 09/28 – 10/04 | 源码搬进 `Fish/src/Platform/Vulkan/` + 加 `Vulkan` 前缀（✅ 提前做完）<br>分支 `vulkanAPI`（✅ 已有）<br>`VulkanContext` 骨架（⬜ 未做） | 空实现能编译链接 | 🔄 进行中 |
+| W3 | 09/28 – 10/04 | 源码搬进 `Fish/src/Platform/Vulkan/` + 加 `Vulkan` 前缀（✅ 提前做完）<br>`VulkanContext` 骨架（⬜ 未做） | 空实现能编译链接 | 🔄 进行中 |
 | W4 | 10/05 – 10/11 | `VulkanContext` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 | ⬜ 未开始 |
 | W5 | 10/12 – 10/18 | `VulkanRendererAPI : RendererAPI`；帧模型 | `BeginFrame/EndFrame` 跑通，每帧 clear | ⬜ 未开始 |
 | W6 | 10/19 – 10/25 | 顶点/索引缓冲抽象；pipeline 创建 | 静态图形能画出来 | ⬜ 未开始 |
@@ -192,19 +192,23 @@
 
 ## 八、立刻要做的
 
-- [ ] **Fish 项目提交 + 开分支**
+- [x] **Fish 项目提交**（✅ 已完成。**不开分支，全部提交到 `main`** —— 见下方说明）
       ```bash
       cd /d/Fish
-      git add -A
-      git commit -m "engine skeleton + 计划书"
-      git push
-      git checkout -b vulkan-backend
-      git push -u origin vulkan-backend
+      git add -A && git commit -m "..."
+      git push origin main
       ```
-- [ ] **`D:\vulkan_project` 建仓 + 首次提交**（这个项目**根本没有 git**）
-      ```bash
-      cd /d/vulkan_project && git init && git add -A && git commit -m "vulkan 学习项目"
-      ```
+- [x] **`D:\vulkan_project` 建仓 + 首次提交**（✅ 已完成）
+
+> **2026-09-19 改：不开分支。**
+> 这条原来写的是 `git checkout -b vulkan-backend`（实际建出来叫 `vulkanAPI`）。
+> 理由是「main 保持随时能跑」——但对你**不成立**：单人项目、没协作者、没 release、没 CI，
+> 而且第二节已经定了放弃 OpenGL，「保住能跑的 main」保的是个要扔的东西。
+> **反过来的坏处是实的**：GitHub 默认分支就是 main，继续在分支上做，投简历时对方
+> 打开看到的是九月的空骨架。
+> `vulkanAPI` 分支已 fast-forward 合进 main（`4d148a7..74eb967`，零冲突）。
+> **以后所有工作直接提交到 main。** 想要「随时能回到能跑的节点」，用 tag 打里程碑
+> （`M1`…`M6`），不用分支。
 - [ ] **开始刷算法**，每天固定时间，不要等
 - [ ] **写简历初稿**（W1 内）
 - [ ] **投日常实习**（W2 开始），不用等大厂，小厂 / 创业公司 / 远程都行
