@@ -6,3 +6,68 @@ Event:
 
 CallBackFunction回调函数是什么：
     在窗口和事件系统做链接的时候，由于想让应用持有窗口的指针，但是窗口不应该知道应用的存在（不调用应用的方法，不拿它的成员......），窗口应当能捕捉事件，但是解决事件要在应用层，因此设置一个callback，让事件发生时，能通过callbackfn调用application里面的解决办法
+
+OpenGL context 与 Vulkan context 职责不同 → 创建时机不同（2026-09-21）:
+
+    【这一段是事实记录，不是我的理解。定义、行号、推导链都查过；推理部分我自己重写一遍。】
+
+    一、成员对比（根源是 GL/VK 语义差异）
+
+    OpenGLContext 只有一个成员 GLFWwindow* m_WindowHandle；Init() 只做
+    glfwMakeContextCurrent + gladLoadGLLoader（OpenGLContext.cpp:12-17）；SwapBuffers()
+    就是 glfwSwapBuffers。OpenGLRendererAPI 更是 0 个成员，5 个方法全是对 glEnable /
+    glViewport / glClearColor / glClear / glDrawElements 的调用。
+    —— GL 的设备和上下文是【线程全局的 current context】，不需要任何句柄。
+
+    VulkanRendererAPI 持有 5 样：vk::raii::Context（函数指针加载器，vulkan-1.dll）/
+    Instance / DebugUtilsMessengerEXT / SurfaceKHR / unique_ptr<VulkanContext>
+    （物理设备 + 逻辑设备 + 两个队列）。
+    —— VK 的设备是【显式对象】，每个操作都要带。
+
+    二、依赖链（这条链决定了创建时机）
+
+    glfwInit()
+      → glfwCreateWindow(GLFW_CLIENT_API = GLFW_NO_API)
+        → Instance（要 GLFW 的 required extensions）
+          → DebugUtilsMessengerEXT（要 instance）
+          → SurfaceKHR（要 instance + 窗口）
+            → 物理设备（要靠 surface 查队列族支不支持呈现）
+              → 逻辑设备 + 队列
+
+    OpenGL 只要链头上那个窗口句柄就够，所以原来能在 WindowsWindow::Init 里就地建。
+
+    三、今天实际怎么切的
+
+    1. WindowsWindow 只留建窗口：glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API) + glfwCreateWindow
+    2. 删掉 m_Context 成员（WindowsWindow.h:27）—— GraphicsContext 这个抽象没有实现者了
+    3. instance / debugMessenger / surface / device 全进 VulkanRendererAPI
+    4. VulkanRendererAPI 构造函数 = default，窗口从 Init(void* nativeWindow) 进
+    5. Renderer::Init() 改成运行时按 RendererAPI::GetAPI() 分派创建
+    6. WindowsWindow 里跟渲染耦合的三处（present / VSync）注释掉，在 PLAN.md 第六节登记归 W5
+
+    弯路：先想过让 VulkanContext 直接继承 GraphicsContext，不新建类。没走通的原因——
+    GraphicsContext 的接口只有 Init() / SwapBuffers() 两个，而 Vulkan 的 Init 要窗口参数、
+    SwapBuffers 对不上 acquire / record / submit / present。而且删掉 m_Context 之后，
+    这个抽象一个实现者都没有了。
+
+    四、过程中撞到的硬约束（都查过源码/头文件）
+
+    1. glfwCreateWindowSurface 要求窗口是 GLFW_NO_API
+       Fish/vendor/GLFW/src/vulkan.c:356-361，否则返回 VK_ERROR_NATIVE_WINDOW_IN_USE_KHR。
+       所以窗口 hint 一换，OpenGL 那条路就断。
+
+    2. 成员声明顺序
+       PhysicalDevice（vulkan_raii.hpp:4377）和 DebugUtilsMessengerEXT（:9306）存的都是
+       【指向 Instance 内部 dispatcher 的裸指针】，后者析构（:9362）会解引用它。而
+       Instance（:3372）自己用 unique_ptr 拥有 dispatcher，它构造又要 Context（:3383）。
+       顺序写反不会报编译错误，是退出时踩空。
+
+    3. Renderer.h 里不能出现 vk:: 类型
+       Renderer.h ← includings.h ← Playground.cpp，而 Playground.vcxproj 缺
+       VULKAN_HPP_NO_STRUCT_CONSTRUCTORS / NOMINMAX / GLFW_INCLUDE_NONE / DEBUG
+       （CMakeLists.txt:114-120 是 PRIVATE，不向链接方传播）。所以 GetDeviceContext()
+       返回 VulkanContext* 时只用前置声明，include 落在 Renderer.cpp 里。
+
+    4. 现在停在哪
+       Shader.cpp:14 的 FS_CORE_ASSERT(false, "Unknown RendererAPI!")。
+       Playground 的两个 layer 还在走 OpenGL，窗口开不出来。
