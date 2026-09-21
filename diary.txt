@@ -9,6 +9,9 @@ CallBackFunction回调函数是什么：
 
 OpenGL context 与 Vulkan context 职责不同 → 创建时机不同（2026-09-21）:
 
+    [我的原话]
+    今天的改动其实遇到了一个让我头痛的问题，就是从 OpenGL 的 context 切换到 Vulkan 的 context 的时候，由于他们两个的职责不一样，OpenGL context 只做了简单的初始化，而 vulkan 的 context 除了做几个初始化之外，还创建了一些必要的资源，并且 vulkan context 持有那些句柄，所以他们的创建时机也不一样，OpenGL context 可以在窗口初始化的时候直接创建，但是 vulkan context 初始化依赖窗口的初始化，所以我决定把两个逻辑分开，最终，窗口初始化 我只放了创建窗口的逻辑，而我把 context 和 vulkan instance 和 debug message 的初始化都放进了 Vulcan renderer API 类里面，然后通过 renderer调用这个类的初始化函数。
+
     【这一段是事实记录，不是我的理解。定义、行号、推导链都查过；推理部分我自己重写一遍。】
 
     一、成员对比（根源是 GL/VK 语义差异）
