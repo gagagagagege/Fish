@@ -4,8 +4,11 @@
 
 
 namespace Fish {
-	void OpenGLRendererAPI::Init()
+	void OpenGLRendererAPI::Init(void* nativeWindow)
 	{
+		// GL 的设备是线程全局的 current context,窗口在 WindowsWindow::Init 里
+		// 由 OpenGLContext 设好了,这里用不上。参数是为 Vulkan 那侧加的。
+		(void)nativeWindow;
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	}

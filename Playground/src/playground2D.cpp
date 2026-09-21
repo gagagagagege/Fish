@@ -52,8 +52,8 @@ void playground2D::OnUpdate(Fish::Timestep ts)
 	m_CameraController.OnUpdate(ts);
 
 	// Render
-	Fish::RenderCommand::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
-	Fish::RenderCommand::Clear();
+	Fish::Renderer::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
+	Fish::Renderer::Clear();
 
 	Fish::Renderer::BeginScene(m_CameraController.GetCamera());
 

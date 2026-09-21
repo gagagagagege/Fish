@@ -1,6 +1,8 @@
 #include "fspch.h"
 #include"WindowsWindow.h"
-#include"Platform/OpenGl/OpenGLContext.h"
+// OPENGL 遗留:窗口不再持有 GraphicsContext。GraphicsContext.h / OpenGLContext.{h,cpp}
+// 这三个文件现在没有使用者,留到彻底删 OpenGL 那一步一起清
+// #include"Platform/OpenGl/OpenGLContext.h"
 
 #include"Event/MouseEvent.h"
 #include"Event/KeyEvent.h"
@@ -41,13 +43,16 @@ namespace Fish {
 			glfwSetErrorCallback(GLFWErrorCallback);
 		}
 		
-
-
+		glfwInit();
+		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		m_Window = glfwCreateWindow((int)props.Width, (int)props.Height, m_Data.Title.c_str(), nullptr, nullptr);
-		m_Context = new OpenGLContext(m_Window);
-		m_Context->Init();
+		glfwSetWindowUserPointer(m_Window, this);
+		//glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+
 		glfwSetWindowUserPointer(m_Window, &m_Data);
-		SetVSync(true);
+		// OPENGL 遗留:VSync。Vulkan 侧由交换链的 presentMode 决定,
+		// 见 VulkanSwapChain.cpp:81 choosePresentMode
+		// SetVSync(true);
 
 
 		//从GLFW库里面获取一些函数回调         回调注册后只要窗口存在，就一直有效，能持续捕捉事件
@@ -147,7 +152,6 @@ namespace Fish {
 
 	void WindowsWindow::Shutdown()
 	{
-		delete m_Context;
 		glfwDestroyWindow(m_Window);
 	}
 
@@ -155,17 +159,18 @@ namespace Fish {
 	{
 
 		glfwPollEvents();
-		m_Context->SwapBuffers();
-	
+		// OPENGL 遗留:present。Vulkan 侧要等帧模型 —— W4 先在 VulkanRendererAPI 里
+		// 写一个最小帧循环(acquire / 录 clear / submit / present),W5 再拆成
+		// BeginFrame / EndFrame
+		// m_Context->SwapBuffers();
+
 	}
 
 	void WindowsWindow::SetVSync(bool enabled)
 	{
 
-		if (enabled)
-			glfwSwapInterval(1);
-		else
-			glfwSwapInterval(0);
+		// OPENGL 遗留:Vulkan 侧由交换链 presentMode 决定
+		// if (enabled) glfwSwapInterval(1); else glfwSwapInterval(0);
 
 		m_Data.VSync = enabled;
 	}

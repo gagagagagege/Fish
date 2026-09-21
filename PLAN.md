@@ -22,6 +22,24 @@
 扔掉 OpenGL 之后，"为什么用 Vulkan" 才有答案——bindless 描述符、GPU 侧决策这些事 OpenGL 做不了。
 两个后端并存反而会让 Vulkan 看起来像简历粉饰。
 
+#### OpenGL 遗留代码怎么处理（2026-09-21 定）
+
+OpenGL **不一次改完**——工作量太大。**走到哪改到哪。**
+
+1. 改动牵连到别的 OpenGL 逻辑时，**把被牵连的那部分注释掉**，不要为了它绕路
+2. 注释用 `// OPENGL 遗留:` 开头，写明**原来是什么** + **归哪一周**
+3. 同时在第六节的**登记表**里加一行：文件、行号、原逻辑、归哪周
+4. 做那一周的时候，把登记项和代码注释一起清掉
+
+**没有使用者但还没删的文件**同理（`GraphicsContext.h`、`OpenGLContext.{h,cpp}` 现在就是这种）
+——留着，等彻底删 OpenGL 那一步一起清。
+
+找所有遗留点：
+
+```bash
+grep -rn "OPENGL 遗留" Fish/src Playground/src
+```
+
 ### 差异化：bindless → GPU-driven
 
 > **封装是及格线，技术是得分点。**
@@ -90,15 +108,17 @@
 | | 内容 |
 |---|---|
 | **M1** | Vulkan 侧重构：`Buffer` / `Image` / `FrameData`，不碰 Fish |
-| **M2** | `VulkanContext : GraphicsContext`，能开窗 + clear |
+| **M2** | `VulkanRendererAPI` + Vulkan 初始化，能开窗 + clear |
 | **M3** | `VulkanRendererAPI` + 三角形走通 Fish 的 `Renderer::Submit` |
 | **M4** | `VulkanShader` / `VulkanTexture2D` |
 | **M5** | `Renderer2D` 接进来 ← **核心交付** |
 | **M6** | ImGui |
 
-> **M2 的类名要另起。** 2026-09-19 搬源码时，`vkContext`（设备/队列/物理设备那个）
-> 连类名一起变成了 `VulkanContext` —— 这个名字已经被占了。M2 里继承 `GraphicsContext`
-> 的那个类得换个名字。
+> **M2 不另起类名。**（2026-09-21 改。原先写的是「`VulkanContext` 名字被占了，得换一个」）
+> `VulkanContext` 保持原名和现状 —— 它仍然是设备/队列/物理设备那个包装类，
+> **不继承 `GraphicsContext`**。M2 改为新建 `VulkanRendererAPI`，由它负责 instance、
+> debugMessenger，以及创建 `VulkanContext`。
+> `TriangleApp` / `VulkanMain.cpp` 2026-09-21 已删（原型的壳，逻辑收进 Fish）。
 
 **时间不够时的砍的顺序**：ECS → compute culling → indirect
 **底线**：bindless + Renderer2D
@@ -111,12 +131,32 @@
 **节奏**：每周留一天不排计划，用来补欠。
 **每周日**：花 15 分钟对一次计划，落后了就调整后面几周，不要硬扛。
 
+### 计划和顺序（2026-09-21 定）
+
+**计划不是固定的，挡路了就调顺序。** 但"挡路"和"进度快"是两回事：
+
+| 理由 | 允许吗 | 怎么做 |
+|---|---|---|
+| **挡路** | ✅ | 把那周的活提前过来做。**但要在表里标明它原本排在哪一周、被什么挡住** |
+| **进度快** | ❌ | 只把当周标成完成，后面几周的定义**一个字都不改** |
+| **临时改动引起的新任务** | ✅ | 直接加（比如「OpenGL 遗留登记」机制） |
+
+**判据**：挪完之后，表里还能回答"这个本来是 W_n 的活"。
+
+进度快于计划**本身是产出**，要让它显形——计划和现实永远贴在一起的话，
+"我一直跑在计划前面"这件事就看不见了。
+
+> 2026-09-21 犯过：W3 完成后，我把 W4 那格改成「最小帧循环 + 关掉 ImGui 层 +
+> Playground 换 layer」，理由是"它们挡路"。**挡路这个理由成立，问题出在我没标明
+> 它们原本排在哪周**——读起来像是 W4 本来就这么定义的。已改回原样，
+> 只把 `VulkanContext` 这个名字更正成 `VulkanRendererAPI`（那是改名，不是挪活）。
+
 | 周 | 日期 | 项目主线 | 验收标准 | 状态 |
 |---|---|---|---|---|
 | W1 | 09/14 – 09/20 | git 整理（两个仓库）、简历初稿、M1 开工 | 两仓库都有首次提交；`Buffer` 骨架能编译 | ✅ 完成 |
 | W2 | 09/21 – 09/27 | **M1 完成** | vulkan_project 跑起来，旋转贴图四边形正常；6 个调用点全改成类构造；**开始投日常实习** | ✅ 完成 |
-| W3 | 09/28 – 10/04 | 源码搬进 `Fish/src/Platform/Vulkan/` + 加 `Vulkan` 前缀（✅ 提前做完）<br>`VulkanContext` 骨架（⬜ 未做） | 空实现能编译链接 | 🔄 进行中 |
-| W4 | 10/05 – 10/11 | `VulkanContext` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 | ⬜ 未开始 |
+| W3 | 09/28 – 10/04 | 源码搬进 `Fish/src/Platform/Vulkan/` + 加 `Vulkan` 前缀<br>`VulkanRendererAPI` 骨架 + 接进 `Renderer` | 空实现能编译链接 | ✅ 完成 |
+| W4 | 10/05 – 10/11 | `VulkanRendererAPI` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 | ⬜ 未开始 |
 | W5 | 10/12 – 10/18 | `VulkanRendererAPI : RendererAPI`；帧模型 | `BeginFrame/EndFrame` 跑通，每帧 clear | ⬜ 未开始 |
 | W6 | 10/19 – 10/25 | 顶点/索引缓冲抽象；pipeline 创建 | 静态图形能画出来 | ⬜ 未开始 |
 | W7 | 10/26 – 11/01 | **M3**；swapchain 重建接入 `onWindowResize` | **三角形走通 `Renderer::Submit`**；resize 不崩 | ⬜ 未开始 |
@@ -131,6 +171,23 @@
 | W16 | 12/28 – 01/03 | GPU-driven：compute culling（**期末季，预期放低**） | draw 决策在 GPU 侧 | ⬜ 未开始 |
 | W17 | 01/04 – 01/10 | 收尾：demo 视频、README、过程文档 | 三件套齐 | ⬜ 未开始 |
 | W18 | 01/11 – 01/17 | 缓冲 + 提前批准备 | 简历定稿、内推已铺、项目讲解稿（3 分钟版 + 10 分钟版） | ⬜ 未开始 |
+
+### OpenGL 遗留登记
+
+> 由第二节「OpenGL 遗留代码怎么处理」产生。**做对应那一周时清掉——代码注释和这里的行一起删。**
+> 代码里的位置：`grep -rn "OPENGL 遗留" Fish/src Playground/src`
+
+| 归哪周 | 位置 | 原逻辑 | 现状 |
+|---|---|---|---|
+| **W5** | `WindowsWindow.cpp` `OnUpdate()` | `m_Context->SwapBuffers();` —— OpenGL 的 present | 已注释 |
+| **W5** | `WindowsWindow.cpp` `Init()` | `SetVSync(true);` | 已注释 |
+| **W5** | `WindowsWindow.cpp` `SetVSync()` | `glfwSwapInterval(1/0)` | 已注释。Vulkan 侧对应交换链的 `VulkanSwapChain.cpp:81` `choosePresentMode` |
+| 彻底删 OpenGL | `Renderer/GraphicsContext.h`、`Platform/OpenGL/OpenGLContext.{h,cpp}` | 现在没有使用者，还没删 | 留着 |
+| 彻底删 OpenGL | `Fish/src/Platform/OpenGL/` 其余 12 个文件、`CMakeLists.txt` 里的 `glad` | | 留着 |
+
+> **归到 W5 的理由**：present 和 VSync 都属"帧模型"，W5 那格写的就是它。
+> W4 的验收标准是「开窗 + clear 成纯色」，跟 present 有交叉 —— 但那是 W4 到时候的事，
+> **不提前改 W4 的定义**（见下面的「不要提前」）。
 
 > **进度更新 2026-09-19**（本文件是唯一一份；`D:\vulkan_project` 里那份已删）
 >
@@ -148,6 +205,33 @@
 > **搬进来的 Vulkan 代码目前全是死代码** —— 没有任何东西 new `TriangleApp`。
 >
 > 未确认的两项：W1 的「简历初稿」、W2 的「开始投日常实习」—— 这两件我这边没有任何依据。
+
+> **进度更新 2026-09-21**
+>
+> **W3 ✅ 完成，做过头了。** 原本的边界是「`VulkanRendererAPI` 骨架」，实际做到「Vulkan
+> 初始化真的跑起来」：
+>
+> - 新建 `Platform/Vulkan/VulkanRendererAPI.{h,cpp}`：持 `Context` / `Instance` /
+>   `DebugUtilsMessenger` / `Surface` / `unique_ptr<VulkanContext>`
+> - `Renderer` 改成**运行时创建后端**（`Renderer.cpp` 的 `Init` 按 `RendererAPI::GetAPI()` 分派），
+>   `RendererAPI::Init()` 加 `void* nativeWindow` 参数
+> - 加 `Renderer::GetDeviceContext()`（`Renderer.h` 里只前置声明 `class VulkanContext;`，
+>   公共头不出现 Vulkan 类型）
+> - `WindowsWindow` 按 Vulkan 建窗（`GLFW_CLIENT_API = GLFW_NO_API`），`m_Context` 成员删掉
+> - **删**：`TriangleApp.{h,cpp}`、`VulkanMain.cpp`、`RenderCommand.{h,cpp}`
+> - 新增「OpenGL 遗留登记」机制（第二节规则 + 本节登记表）
+>
+> **验证**：构建 0 错误；**Vulkan 初始化跑通了** —— stderr 只有 37 字节（glad 的
+> `Failed to initialize OpenGL loader!`），**零验证层输出**，说明 `createInstance` /
+> `setupDebugMessenger` / `createWin32Surface` / `VulkanContext` 全部干净通过。
+>
+> ⚠️ **进程现在停在 `Shader.cpp:14` 的 `FS_CORE_ASSERT(false, "Unknown RendererAPI!")`** ——
+> `Playground` 的 layer 还在走 OpenGL。要往前走，先处理 ImGui 层（`Application.cpp:26-27`）
+> 和 `Playground` 的两个 layer。
+>
+> ⚠️ **一条旧数据对不上**：09-19 记的「`Playground` 10 秒墙钟烧 9.95 秒 CPU」今天不复现，
+> 三次采样 4.02/8、3.83/6、3.83/6，约 50–64% 单核。**原因未查明**（怀疑那次的窗口被遮挡，
+> vsync 不生效变成全速空转）。要判的话得用 `git worktree` 做对照实验。
 
 ### 关于 W15–W16（期末）
 

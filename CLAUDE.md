@@ -1,6 +1,6 @@
 # 协作须知
 
-> 建立于 2026-09-17,最后更新 2026-09-19(**合并成唯一一份**)。
+> 建立于 2026-09-17,最后更新 2026-09-21。
 > 本文件每次会话开始时自动加载。
 >
 > 2026-09-19 之前 Fish 和 `D:\vulkan_project` 各有一份,内容 90% 相同、各写各的第三节。
@@ -39,6 +39,23 @@
 
 默认写得比我要的长,我会手动删。**能一段说清就别写两段**,不要复述代码在做什么,
 只写"为什么这么写 / 换成别的会怎样"。
+
+### 别用比喻
+
+2026-09-21:我写「`VulkanRendererAPI` **戴两顶帽子**」—— 你看不懂。
+
+**一个东西有两个职责,就直接写"它同时是 X,又是 Y"。** 不要借代、拟人、意象。
+
+本轮犯过的,以后不要:
+
+| 我写的 | 该写的 |
+|---|---|
+| 戴两顶帽子 | 它同时是 `RendererAPI` 的实现,又是 `VulkanContext` 的持有者 |
+| 换了个门 | 只是把暴露点从 `VulkanRendererAPI*` 挪到 `Renderer*`,暴露的类型没变 |
+| 第一堵墙 | 落地时最先要解决的问题 |
+| 踩了 (a) 和 (b) 的坏处 | 同时有 (a) 和 (b) 那两个代价 |
+
+**表、行号、代码片段都欢迎 —— 那些是压缩,不是比喻。**
 
 ## 二、动手之前
 
@@ -106,12 +123,13 @@ Vulkan 后端按 20 写的。Fish 原有代码是 17,向下兼容,没改。
 - **除 `TriangleApp` 外,所有文件都加了 `Vulkan` 前缀**(`Buffer` → `VulkanBuffer`,
   `texture` → `VulkanTexture`)。`main.cpp` → `VulkanMain.cpp`。
   **类名基本没改**,只有 `vkContext` 连类名一起变成了 `VulkanContext`。
-- **`VulkanContext` 这个名字因此被占了。** PLAN 的 M2 写的是
-  `VulkanContext : GraphicsContext`(开窗 + clear 那个)—— 到 W4 得给它另起个名。
+- **`VulkanContext` 这个名字不换。**(2026-09-21 改。原先写的是「名字被占了,得另起」)
+  它仍然是设备/队列/物理设备那个包装类,**不继承 `GraphicsContext`**。
+  M2 是新建 `VulkanRendererAPI`,由它负责 instance、debugMessenger 和创建 `VulkanContext`。
 - 它靠 `GLOB_RECURSE` 自动进 `Fish` 静态库,不需要在 CMakeLists 里单独列。
-- **它现在全是死代码。** 没有任何东西 new `TriangleApp`;`VulkanMain.cpp` 里那个
-  `main()` 也在库里(和 Playground 的 `main()` 并存,目前不冲突)。接进 Fish 是 W4/W5 的事。
-- 资产在 `Platform/Vulkan/{shaders,textures}`。`TriangleApp` 按**相对路径**读
+- **`TriangleApp.{h,cpp}` / `VulkanMain.cpp` 2026-09-21 已删**(原型的壳,逻辑收进 Fish)。
+  剩下的后端代码**仍是死代码** —— 还没有任何东西 new 它们。接进 Fish 是 W3/W4 的事。
+- 资产在 `Platform/Vulkan/{shaders,textures}`。`VulkanPipeline.cpp:9` 按**相对路径**读
   `shaders/slang.spv`,指的是工作目录 —— `CMakeLists.txt` 目前**没有**把它们拷到输出目录。
 
 Vulkan 相关的编译定义集中在 `CMakeLists.txt` 的"Vulkan 后端"一段。其中

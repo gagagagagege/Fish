@@ -16,7 +16,7 @@ namespace Fish {
         m_Window = std::unique_ptr<Window>(Window::Create());
         Input::Init(static_cast<GLFWwindow*>(m_Window->GetNativeWindow()));
 
-        Renderer::Init();
+        Renderer::Init(m_Window->GetNativeWindow());
 
         //SetEventCallback把EventCallback设置成了OnEvent函数，每当执行到EventCallback，都会直接跳转到下面OnEvent的定义，所以window还是不知道application
         //因为没有发生替换，只是跳转

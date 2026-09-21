@@ -1,6 +1,5 @@
 #include"Core/Window.h"
 #include <GLFW/glfw3.h>
-#include"Renderer/GraphicsContext.h"
 
 namespace Fish {
 	class WindowsWindow :public Window {
@@ -24,7 +23,6 @@ namespace Fish {
 		virtual void Shutdown();
 	private:
 		GLFWwindow* m_Window;
-		GraphicsContext* m_Context;
 
 		struct WindowData
 		{
