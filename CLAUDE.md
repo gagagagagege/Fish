@@ -236,6 +236,7 @@ git show HEAD:src/xxx.cpp             # 只看单个文件
 |---|---|
 | `PLAN.md` | 总计划。里程碑、逐周表、协作约定。有变动**直接改这个文件**。**只有这一份** —— `D:\vulkan_project` 里那份 2026-09-19 已删(它被 `.gitignore:31` 排除、本就注明"以 Fish 为准",留着只会分叉) |
 | `BUFFER_REFACTOR_TODO.md` | M1(Buffer / Image / FrameData 重构)的完成记录 + 遗留项,**记录的是在 vulkan_project 做完的那轮**。新的重构**照它的格式另起 `XXX_REFACTOR_TODO.md`** |
+| `INTERVIEW_NOTES.md` | 面经笔记(腾讯 / 网易 游戏引擎开发)。**考点清单、各家差异、真题实录只有这一份** —— `PLAN.md` 第四节只留指针 |
 | `diary.txt` | 我自己的理解 |
 | `README.md` | 对外 |
 
