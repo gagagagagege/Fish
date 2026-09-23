@@ -164,12 +164,27 @@ cd build/Debug && ./VulkanProject.exe     # 工作目录必须是 build/Debug
 | 工作目录 | 仓库根 | 可执行文件所在目录 |
 | 资源 | `Playground/assets/` + `Platform/Vulkan/{shaders,textures}` | `src/shaders`、`src/textures`,构建时拷到产物目录 |
 | 第三方 | `Fish/vendor/` 走 submodule | `GLFW/`、`glm/` 直接提交 |
-| 构建噪音 | 无 | `pwsh.exe`(见下) |
+| 构建噪音 | `pwsh.exe`(见下) | `pwsh.exe`(见下) |
 
 ### 构建时的已知噪音
 
-**只有 `D:\vulkan_project` 有。** `'pwsh.exe' 不是内部或外部命令` 是它的
-post-build 步骤(Slang 编译)调 PowerShell 7 报的,这台机器没装 —— **Fish 这边不会出现**。
+**两边都有,来源是 vcpkg,不是 Slang。**(2026-09-23 更正。原先写的是「只有 vulkan_project 有,
+是它的 post-build 步骤(Slang 编译)调 PowerShell 7」—— 查了,两边的 `CMakeLists.txt` 里
+都没有 `pwsh`,也都没有调 PowerShell 的 post-build。)
+
+实际来源是 vcpkg 的 MSBuild 集成,长这样:
+
+```
+AppLocalFromInstalled:
+  pwsh.exe -ExecutionPolicy Bypass ... -File "C:\vcpkg\scripts\buildsystems\msbuild\applocal.ps1" ...
+  'pwsh.exe' 不是内部或外部命令...
+  命令"..."已退出，代码为 9009。
+  "C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -ExecutionPolicy Bypass ... applocal.ps1 ...
+```
+
+**它先试 PowerShell 7(这台机器没装),失败后自动退回 `powershell.exe` 重跑一次。**
+所以是**无害**的,只在目标真的要链接时才打印(`ZERO_CHECK` 之类的空转不打印)。
+要确认每次链接都发生了,看有没有第二行 `powershell.exe`。
 
 ### 这个仓库里不要用 `git stash`
 
