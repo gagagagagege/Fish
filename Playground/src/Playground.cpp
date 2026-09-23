@@ -139,7 +139,8 @@ public:
 
 		// Render
 		Fish::Renderer::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
-		Fish::Renderer::Clear();
+		// OPENGL 遗留:Renderer::Clear() 已删(清屏由 BeginFrame 做)。归 W8/W9。
+		//Fish::Renderer::Clear();
 
 		Fish::Renderer::BeginScene(m_CameraController.GetCamera());
 		// 1
@@ -190,8 +191,12 @@ private:
 class Playground :public Fish::Application {
 public:
 	Playground() {
-		PushLayer(new ExampleLayer());
-		PushLayer(new playground2D());
+		// OPENGL 遗留:两个 layer 的构造函数里全是 OpenGL 对象(Shader::Create /
+		// VertexArray::Create / Texture2D::Create),而工厂现在分派到 Vulkan,
+		// 撞 Shader.cpp:14 的断言。等 Vulkan 侧的 Shader/VertexArray/Texture2D
+		// 适配类做完再放回来 —— 归 W8/W9。
+		//PushLayer(new ExampleLayer());
+		//PushLayer(new playground2D());
 	}
 	~Playground()
 	{}

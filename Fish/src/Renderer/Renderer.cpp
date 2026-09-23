@@ -5,7 +5,6 @@
 #include"Platform/Vulkan/VulkanRendererAPI.h"
 
 namespace Fish {
-	// 改成运行时创建:建 Vulkan 的 surface 要窗口,静态初始化时 GLFW 还没 init
 	RendererAPI* Renderer::s_RendererAPI = nullptr;
 
 	Renderer::SceneData* Renderer::s_SceneData = new Renderer::SceneData;
@@ -23,6 +22,16 @@ namespace Fish {
 			}
 		}
 		s_RendererAPI->Init(nativeWindow);
+	}
+
+	void Renderer::Shutdown()
+	{
+		// 置空是为了让 Init 里那句 != nullptr 判断保持能重进的形状,单进程只会走一次。
+		delete s_RendererAPI;
+		s_RendererAPI = nullptr;
+
+		delete s_SceneData;
+		s_SceneData = nullptr;
 	}
 
 	void Renderer::BeginScene(OrthographicCamera& camera)
@@ -48,20 +57,18 @@ namespace Fish {
 		s_RendererAPI->SetClearColor(color);
 	}
 
-	void Renderer::Clear()
+	void Renderer::DrawFrame()
 	{
-		s_RendererAPI->Clear();
+		s_RendererAPI->DrawFrame();
 	}
 
-	void Renderer::onWindowResize(uint32_t width, uint32_t height)
+	void Renderer::NotifyWindowResized()
 	{
-		s_RendererAPI->setViewport(0,0,width, height);
+		s_RendererAPI->NotifyWindowResized();
 	}
 
 	VulkanContext* Renderer::GetDeviceContext()
 	{
-		// 只读 s_RendererAPI 一处状态。用 RendererAPI::GetAPI() 判断的话就多一处
-		// 状态要跟它保持一致(s_API 和 s_RendererAPI 现在都是各写各的)
 		auto* vulkan = dynamic_cast<VulkanRendererAPI*>(s_RendererAPI);
 		return vulkan ? vulkan->m_DeviceContext.get() : nullptr;
 	}

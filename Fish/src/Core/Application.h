@@ -30,7 +30,9 @@ namespace Fish {
 		bool m_Running = true;
 		bool m_minimized = false;
 		std::unique_ptr<Window> m_Window;
-		ImGuiLayer* m_ImGuiLayer;
+		// 原来没初始化。ImGui 层暂时不建(见 Application.cpp 的 OPENGL 遗留),
+		// run() 里靠判空跳过。
+		ImGuiLayer* m_ImGuiLayer = nullptr;
 		static Application* Instance;
 		LayerStack m_LayerStack;
 		float m_LastFrameTime = 0.0f;

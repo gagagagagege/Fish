@@ -53,7 +53,8 @@ void playground2D::OnUpdate(Fish::Timestep ts)
 
 	// Render
 	Fish::Renderer::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
-	Fish::Renderer::Clear();
+	// OPENGL 遗留:Renderer::Clear() 已删(清屏由 BeginFrame 做)。归 W8/W9。
+	//Fish::Renderer::Clear();
 
 	Fish::Renderer::BeginScene(m_CameraController.GetCamera());
 

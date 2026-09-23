@@ -23,12 +23,17 @@ namespace Fish {
         //回调函数的意义就是在合适时机调用一个已经保存好的函数
         m_Window->SetEventCallback(BIND_EVENT_FN(OnEvent));
 
-        m_ImGuiLayer = new ImGuiLayer();
-        PushOverlay(m_ImGuiLayer);
+        // OPENGL 遗留:ImGui 层原来是无条件建的,但 ImGuiLayer::OnAttach 走的是
+        // ImGui_ImplGlfw_InitForOpenGL + ImGui_ImplOpenGL3_Init(ImGuiLayer.cpp:48-49),
+        // 而窗口现在是 GLFW_NO_API、没有 GL context。归 M6(ImGui 接 Vulkan 后端)。
+        //m_ImGuiLayer = new ImGuiLayer();
+        //PushOverlay(m_ImGuiLayer);
     }
 
 
-    Application::~Application() {}
+    Application::~Application() {
+        Renderer::Shutdown();
+    }
 
     void Application::PushLayer(Layer* layer) {
         m_LayerStack.PushLayer(layer);
@@ -65,15 +70,21 @@ namespace Fish {
             m_LastFrameTime = time;
 
             if (!m_minimized) {
+                // 先全部更新,再画一帧。layer 的 Submit 只入队,不碰命令缓冲
+                // —— 命令缓冲只在 DrawFrame 里开着。
                 for (Layer* layer : m_LayerStack) {
                     layer->OnUpdate(timestep);
                 }
+                Renderer::DrawFrame();
             }
 
-            m_ImGuiLayer->Begin();
-            for (Layer* layer : m_LayerStack)
-                layer->OnImGuiRender();
-            m_ImGuiLayer->End();
+            // OPENGL 遗留:ImGui 层暂时不建,判空跳过。归 M6。
+            if (m_ImGuiLayer) {
+                m_ImGuiLayer->Begin();
+                for (Layer* layer : m_LayerStack)
+                    layer->OnImGuiRender();
+                m_ImGuiLayer->End();
+            }
 
             m_Window->OnUpdate();
 
@@ -91,7 +102,7 @@ namespace Fish {
             m_minimized = true;
         }
         m_minimized = false;
-        Renderer::onWindowResize(e.GetWidth(), e.GetHeight());
+        Renderer::NotifyWindowResized();
 
         return false;
     }

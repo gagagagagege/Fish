@@ -6,7 +6,10 @@ namespace Fish {
 	Pipeline::Pipeline(VulkanContext* context, const std::vector<vk::DynamicState>& dynamicStates,
 		vk::Format swapChainImageFormat, vk::raii::DescriptorSetLayout& descriptorSetLayout)
 	{
-		vk::raii::ShaderModule shaderModule = shader::createShaderModule(shader::readFile("shaders/slang.spv"), context->device);
+		// 从 "shaders/slang.spv" 改来的:那句是 vulkan_project 的写法,那边工作目录是产物目录,
+		// CMake 会把资产拷过去。Fish 的工作目录是仓库根,资产留在源码树里,
+		// 所以改成仓库根相对 —— 和 Playground.cpp:107-109 读 Playground/assets/ 一个约定。
+		vk::raii::ShaderModule shaderModule = shader::createShaderModule(shader::readFile("Fish/src/Platform/Vulkan/shaders/slang.spv"), context->device);
 
 		vk::PipelineShaderStageCreateInfo vertShaderStageInfo{
 			.stage = vk::ShaderStageFlagBits::eVertex,
