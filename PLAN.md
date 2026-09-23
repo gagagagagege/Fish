@@ -201,8 +201,11 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | **挡路** | ✅ | 把那周的活提前过来做。**但要在表里标明它原本排在哪一周、被什么挡住** |
 | **进度快** | ❌ | 只把当周标成完成，后面几周的定义**一个字都不改** |
 | **临时改动引起的新任务** | ✅ | 直接加（比如「OpenGL 遗留登记」机制） |
+| **改验收标准**（主观排序，不是被挡） | ✅ | **当周「验收标准」那一栏一个字都不改**，差的那部分单独记进下面「画面验收欠账登记」 |
 
 **判据**：挪完之后，表里还能回答"这个本来是 W_n 的活"。
+**改验收同理**：原标准留在表里别动，实际做到什么记在别处 —— 否则半年后读起来
+像是"这周本来就只要求接上线"。
 
 进度快于计划**本身是产出**，要让它显形——计划和现实永远贴在一起的话，
 "我一直跑在计划前面"这件事就看不见了。
@@ -217,7 +220,7 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | W1 | 09/14 – 09/20 | git 整理（两个仓库）、简历初稿、M1 开工 | 两仓库都有首次提交；`Buffer` 骨架能编译 | ✅ 完成 |
 | W2 | 09/21 – 09/27 | **M1 完成** | vulkan_project 跑起来，旋转贴图四边形正常；6 个调用点全改成类构造；**开始投日常实习** | ✅ 完成 |
 | W3 | 09/28 – 10/04 | 源码搬进 `Fish/src/Platform/Vulkan/` + 加 `Vulkan` 前缀<br>`VulkanRendererAPI` 骨架 + 接进 `Renderer` | 空实现能编译链接 | ✅ 完成 |
-| W4 | 10/05 – 10/11 | `VulkanRendererAPI` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 | ⬜ 未开始 |
+| W4 | 10/05 – 10/11 | `VulkanRendererAPI` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 | 🔵 进行中 |
 | W5 | 10/12 – 10/18 | `VulkanRendererAPI : RendererAPI`；帧模型 | `BeginFrame/EndFrame` 跑通，每帧 clear | ⬜ 未开始 |
 | W6 | 10/19 – 10/25 | 顶点/索引缓冲抽象；pipeline 创建 | 静态图形能画出来 | ⬜ 未开始 |
 | W7 | 10/26 – 11/01 | **M3**；swapchain 重建接入 `onWindowResize` | **三角形走通 `Renderer::Submit`**；resize 不崩 | ⬜ 未开始 |
@@ -233,6 +236,27 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | W17 | 01/04 – 01/10 | 收尾：demo 视频、README、过程文档 | 三件套齐 | ⬜ 未开始 |
 | W18 | 01/11 – 01/17 | 缓冲 + 提前批准备 | 简历定稿、内推已铺、项目讲解稿（3 分钟版 + 10 分钟版） | ⬜ 未开始 |
 
+### 画面验收欠账登记
+
+> 由 **2026-09-23 的决定**产生：**按后端建立顺序和 Fish 链接，暂时不做画面上的验收。**
+> 触发理由不是"挡路"，是主观排序（宁可一段时间看不见输出，也要先把后端接完）。
+>
+> **上面那栏「验收标准」一个字都没改** —— 照旧写着"能画出来"。实际交付时只做到
+> "链路通 + 验证层干净"，差的部分记在这里。**结账时把对应行删掉。**
+
+| 归哪周 | 被降级的周 | 原验收标准 | 实际做到 |
+|---|---|---|---|
+| | W4 | Fish 能开窗 + clear 成纯色 | 开窗 ✅ / 后端对象全建出来 ✅ / 干净退出 ✅ / **clear 没验** |
+| | W5 | BeginFrame/EndFrame 跑通，每帧 clear | 跑通 ✅（`DrawFrame` 单函数版，13 秒 12120 帧）/ clear + present 每帧在做 / **画面没看** |
+| | W6 | 静态图形能画出来 | |
+| | W7 | 三角形走通 `Renderer::Submit`；resize 不崩 | resize 那条**已单独验过**，见下 |
+| | W9 | 贴图四边形走 Renderer::Submit | |
+| | W11 | 单个 quad 能画出来 | |
+| | W12 | 1000+ 精灵批处理、帧率稳定；commit + push + 录 demo 截图 | |
+
+**「归哪周」这一列是空的 —— 画面欠账集中到哪一周结，那一格要你自己定。**
+定之前，「实际做到」那列每做完一周填一次。不依赖画面的验收（比如 W7 的 resize）照旧单独验。
+
 ### OpenGL 遗留登记
 
 > 由第二节「OpenGL 遗留代码怎么处理」产生。**做对应那一周时清掉——代码注释和这里的行一起删。**
@@ -243,6 +267,10 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | **W5** | `WindowsWindow.cpp` `OnUpdate()` | `m_Context->SwapBuffers();` —— OpenGL 的 present | 已注释 |
 | **W5** | `WindowsWindow.cpp` `Init()` | `SetVSync(true);` | 已注释 |
 | **W5** | `WindowsWindow.cpp` `SetVSync()` | `glfwSwapInterval(1/0)` | 已注释。Vulkan 侧对应交换链的 `VulkanSwapChain.cpp:81` `choosePresentMode` |
+| **M6** | `Application.cpp` 构造函数 | `m_ImGuiLayer = new ImGuiLayer(); PushOverlay(...)` | 已注释。`ImGuiLayer::OnAttach` 走 `InitForOpenGL` + `OpenGL3_Init`（`ImGuiLayer.cpp:48-49`），窗口现在是 `GLFW_NO_API` 没 GL context |
+| **M6** | `Application.cpp` `run()` | `m_ImGuiLayer->Begin() / End()` | 已改成判空跳过 |
+| **M6** | `Application.h:33` | `ImGuiLayer* m_ImGuiLayer;`（**原来没初始化**） | 改成 `= nullptr`，判空要靠它 |
+| **W8/W9** | `Playground/src/Playground.cpp` `Playground()` | `PushLayer(new ExampleLayer())` / `PushLayer(new playground2D())` | 已注释。两个 layer 构造函数里全是 OpenGL 对象，撞 `Shader.cpp:14` 的断言。等 W8/W9 的适配类做完放回来 |
 | 彻底删 OpenGL | `Renderer/GraphicsContext.h`、`Platform/OpenGL/OpenGLContext.{h,cpp}` | 现在没有使用者，还没删 | 留着 |
 | 彻底删 OpenGL | `Fish/src/Platform/OpenGL/` 其余 12 个文件、`CMakeLists.txt` 里的 `glad` | | 留着 |
 
@@ -293,6 +321,127 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 > ⚠️ **一条旧数据对不上**：09-19 记的「`Playground` 10 秒墙钟烧 9.95 秒 CPU」今天不复现，
 > 三次采样 4.02/8、3.83/6、3.83/6，约 50–64% 单核。**原因未查明**（怀疑那次的窗口被遮挡，
 > vsync 不生效变成全速空转）。要判的话得用 `git worktree` 做对照实验。
+
+> **进度更新 2026-09-23**
+>
+> **改验收标准，不排序。** 决定：**按后端建立顺序和 Fish 链接，暂时不做画面上的验收。**
+>
+> 先纠正一点：W4→W9 的**做事顺序**本来就接近这个；真正改的是**验收标准** ——
+> W6「静态图形能画出来」、W7「三角形走通 `Renderer::Submit`」、W9「贴图四边形走通
+> `Renderer::Submit`」这三条里含"看得见"，现在降级成"链路通 + 验证层干净"。
+> 新增了上面那张「画面验收欠账登记」表来记这笔欠账。
+>
+> **链接的工作顺序 —— 照抄 `TriangleApp::initVulkan()`（原文件在 `git show 6258eca^` 里）：**
+>
+> | 步 | 做什么 | 依赖从哪来 | 状态 |
+> |---|---|---|---|
+> | 1 | `SwapChain` | `VulkanSwapChain.h:17` 收 `(VulkanContext*, GLFWwindow*)` | ✅ |
+> | 2 | `DescriptorAllocator` | `VulkanDescriptorAllocator.h:33` 收 `(VulkanContext*, maxSets)` | ✅ |
+> | 3 | `Pipeline` | `VulkanPipeline.h:18` 收 `(…, swapChainImageFormat, descriptorSetLayout)` ← 依赖 1 和 2 | ✅ |
+> | 4 | `CommandPool` ×2（主 / 一次性传输） | `VulkanCommandPool.h:18` 收 `(VulkanContext*)` | ✅ |
+> | 5 | `texture` | `VulkanTexture.h:16` 收 `(VulkanContext*, CommandPool&, path)` ← 依赖 4 | ✅ |
+> | 6 | `Frames` | `VulkanFrameData.h:70` 收 `(…, textureView, textureSampler)` ← **依赖 5** | ✅ |
+> | 7 | 5 个 adapter 类 + 6 处工厂分支 | 见下 | ⬜ |
+>
+> > 2026-09-23 更正：这张表原先是我**从构造函数签名推的**，把 `CommandPool` 排在第 2、
+> > `Pipeline` 排在第 6。原型里 `Pipeline` 在 `CommandPool` 之前（它只要 swapchain format
+> > 和描述符布局，不需要命令池）。**按原型来**——那是真跑过的顺序。
+>
+> **第 6 步是这次改序最直接撞上的地方**：`Frames` 的构造函数要贴图的 view/sampler
+> （原型的形状 —— 一个旋转贴图）。所以贴图（W9）会被提到帧模型前面，不是可选。
+>
+> **要新写 5 个 adapter 类**（那批 Vulkan 类不实现 Fish 的任何接口）：
+> `VulkanVertexBuffer : VertexBuffer`、`VulkanIndexBuffer : IndexBuffer`、
+> `VulkanVertexArray : VertexArray`、`VulkanShader : Shader`、`VulkanTexture2D : Texture2D`。
+> 这原本是 W6/W8/W9 的活。
+>
+> **两个接口形状问题，碰到时再定**（都是"抽象切在哪层"，属于你要想的）：
+> - `Renderer.cpp:39-40` 的 `Submit` 硬转 `OpenGLShader` 再 `UploadUniformMat4`
+> - `RendererAPI::DrawIndexed(vertexArray)` 只收一个 VertexArray —— 这是 OpenGL 的形状
+>   （绑 VAO → `glDrawElements`），Vulkan 侧还要 pipeline + 描述符 + 命令缓冲
+>
+> **已知的硬约束**：这批 vk::raii 成员的**声明顺序**会被析构顺序约束 —— 命令缓冲必须早于
+> `CommandPool`、描述符集必须早于 `DescriptorAllocator`（`CLAUDE.md` 第六节第 2、3 条）。
+> 往 `VulkanRendererAPI` 里加成员时按这个排，加错了不报编译错误，是退出时踩空。
+> 现在的声明顺序是从 `TriangleApp.h` 抄的。
+>
+> ### 析构：2026-09-23 定并验过
+>
+> 原来 `Renderer.cpp:19` 是 `s_RendererAPI = new VulkanRendererAPI;`，**全仓库没有一处
+> `delete`**，`Application::~Application` 是空的。所以整套 vk::raii（instance / device /
+> swapchain / pipeline / frame 的缓冲和描述符集）**一次都没销毁过**，靠驱动兜底。
+>
+> **决定：在 `Application` 的析构函数里销毁。** 落成 `Renderer::Shutdown()`
+> （`Renderer.cpp`）由 `Application::~Application` 调用 —— 必须在**函数体**里，
+> 不能等成员析构：`m_Window` 是后于这里销毁的，而 surface / instance 的销毁要用到它。
+>
+> ⚠️ **`RendererAPI` 必须有 `virtual ~RendererAPI()`。** 这条不是照本宣科，实测过 A/B：
+>
+> | `~RendererAPI` | 派生类析构 | `exit` | 验证层输出 |
+> |---|---|---|---|
+> | 非虚 | **不执行**（临时打印没出现） | **0** | **0 字节** |
+> | virtual | 执行 | 0 | 0 字节 |
+>
+> **两种写法在退出码和验证层输出上完全一样。** 只有加一行临时打印才分得出
+> —— 非虚那一版 `delete s_RendererAPI` 只跑基类那层，`vkDestroyDevice` /
+> `vkDestroyInstance` 全没发生，而进程照样干净退出。
+> （和 `PLAN.md:110-113` 记的 `GraphicsContext` 那件事同一类，但这次验证层也不会报。）
+>
+> **验过的**：`WM_CLOSE` 退出、`exit=0`、stderr 0 字节（临时打印拆掉后），
+> 窗口前置条件断言过（`Get-Process` 拿到 "Hazel Engine"、`CloseMainWindow()` 返回 `True`）。
+> 整套拆解顺序无误 —— 验证层不报"池里还有未释放的 set"这类错，就是顺序对了的证据。
+>
+> `Renderer::s_SceneData`（`Renderer.cpp:11` 静态初始化时就 `new`，同样只 new 不 delete）
+> 一并在 `Shutdown()` 里清掉了。它是纯 POD，**"那 64 字节被释放"没有可观测的副作用**，
+> 所以这条只做到了"编译过、跑起来退出干净"——没有独立证据，和上面那批 vk::raii 不一样。
+> 多出来的一层风险：`LayerStack` 是 `~Application` **之后**才析构的，哪天有 layer
+> 在析构里碰 `Renderer`，这里的置空会变成空指针解引用（现在没有 layer，不会发生）。
+
+> **进度更新 2026-09-23（下半段）：W5 的帧模型接上了**
+>
+> **`Renderer::DrawFrame()` 落地**，`Application::run()` 每帧调一次：各 layer 的 `OnUpdate`
+> 先跑完，再画一帧。**没有拆成 Begin/End** —— 拆开会让调用方背一个"必须成对"的契约，
+> 而 acquire 拿不到图时想跳帧就会破坏它。合成一个函数后，原型那句 `return` 就够用了。
+>
+> **这里定了一条后续要遵守的规矩：`Submit` 只入队，不碰命令缓冲。**
+> 命令缓冲只在 `DrawFrame` 里开着。这正是 Renderer2D（W10–W12）的形状
+> —— Submit 攒批、Flush 时录。所以 `OnUpdate` 放前面不是绕路，是提前对齐了终点。
+> `DrawFrame` 里已经留了位置注释。
+>
+> **改了一个接口名：`setViewport(x,y,w,h)` → `NotifyWindowResized()`（无参）。**
+> Vulkan 侧 viewport/scissor 是录制时按交换链 extent 设的，那四个参数一个都用不上。
+> 连带 `Renderer::onWindowResize(w,h)` → `Renderer::NotifyWindowResized()`，
+> `m_Viewport` 成员删掉（已经没人读）。`OpenGLRendererAPI` 的 override 按遗留机制注释掉。
+>
+> **删了一个接口：`RendererAPI::Clear()`。** 动态渲染下没有 render pass，
+> 清屏是 `beginRendering` 的 `loadOp + clearValue`，不是一个能单独发的命令。
+> `SetClearColor` 的值现在由 `BeginFrame` 消费。连带改的：
+> `Renderer::Clear()`、`VulkanRendererAPI::Clear()` 删掉；
+> `OpenGLRendererAPI::Clear()` 和两个 Playground layer 里的调用按遗留机制注释掉。
+>
+> **撞到一个真 bug（已修）**：第一版退出时**193 行验证层报错**，全是
+> `vkDestroyFence / vkDestroySemaphore / vkFreeCommandBuffers / vkDestroySwapchainKHR` 的
+> "currently in use by VkQueue" —— GPU 还在跑就把资源销毁了。
+> 原型的 `TriangleApp::cleanUp()` 里本来有 `device.waitIdle()`，注释都写明了原因，
+> **搬进 Fish 时漏了**。补在 `~VulkanRendererAPI()` 函数体里（先于成员析构执行）。
+> 修完 stderr 归零。
+>
+> **两个之前欠着的坑这一格填了：**
+>
+> - `SwapChain::recreate()` 原来没有调用者。现在 `setViewport()` 置 `m_FramebufferResized`，
+>   `BeginFrame` 开头消费它重建（放在 acquire **之前** —— 之后重建会把刚拿到的图像丢掉）。
+> - **resize 验过了**：GLFW 回调收到的尺寸（1478x1570）= 重建后交换链的 extent，
+>   一模一样，验证层零输出。探针脚本里 Windows **没有采纳请求的高度**（被卡在工作区高度），
+>   所以能说的是"尺寸变了、事件到了、按新尺寸重建了"，**不是"精确改成了某个尺寸"**。
+>   另外这台机器是 150% DPI 缩放，探针看到的虚拟尺寸要 ×1.5 才是物理尺寸。
+>
+> **还没做的**：`Renderer::Submit` / `DrawIndexed` 仍是抛异常；没有画任何东西。
+> 帧循环现在每帧只做 clear + present。
+>
+> **一个附带发现**：进程是**全速跑**的（12 秒 5400 帧 ≈ 450fps，8 秒烧 8.8 秒 CPU）。
+> `chooseSwapPresentMode`（`VulkanSwapChain.cpp:42`）优先选 Mailbox，Mailbox 不节流。
+> 这正是 `PLAN.md` 上面那条「09-19 的 CPU 数据今天不复现」待查的原因 ——
+> 不是窗口被遮挡，是 present mode 决定的。
 
 ### 关于 W15–W16（期末）
 
@@ -395,6 +544,26 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | 抽象切在哪层、接口什么形状、为什么这样取舍、先做哪个 | ❌ 自己想（这是判断，是你的收获） |
 
 判据：**答案是可查证的事实就问，是取舍就自己想。**
+
+#### 现有接口不是约束（2026-09-23 定）
+
+**该加的函数就加，该删的就删。老函数只是架构设计上的参考，不是要保住的东西。**
+
+Fish 的渲染接口是从 Hazel 抄来的，那是 OpenGL 的全局状态机形状
+（绑 shader → 传 uniform → 绑 VAO → draw）。Vulkan 没有全局状态：要么在建时烘进
+pipeline，要么在录制时烘进命令缓冲。硬保形状 = 把 OpenGL 的假设带进 Vulkan。
+
+已知对不上的三处（截至 2026-09-23）：
+
+| 接口 | 现状 | 问题 |
+|---|---|---|
+| `RendererAPI::DrawIndexed(vertexArray)` | 只收一个 VertexArray | OpenGL 形状。Vulkan 还要 pipeline + 描述符集 + 命令缓冲 |
+| `Renderer::Submit` | `Renderer.cpp:52` 硬转 `OpenGLShader` 再 `UploadUniformMat4` | `Shader` 抽象里根本没有 uniform 接口 |
+| `Texture2D::Bind(slot)` | `Frames` 构造时就把一张贴图绑进描述符集（`VulkanFrameData.h:33-34`） | 描述符模型下"绑定"不是这个意思 |
+| `VertexBuffer::Bind()` / `VertexArray::Bind()` | GL 的状态切换 | Vulkan 里是录制命令（`vkCmdBindVertexBuffers`），不是状态 |
+
+**边界**：这条说的是"现有形状不神圣"，**不是"抽象切在哪层可以自己定"**——
+上面那张表照旧生效。我不该拿"现在的接口长这样"当不动的理由，但取舍还是要你想。
 
 ### 产出定义
 
