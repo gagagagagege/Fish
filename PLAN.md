@@ -243,8 +243,6 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 > **W5 的形状和计划不一样**：计划写的是 `BeginFrame/EndFrame` 拆开，
 > 实际做的是 `DrawFrame(items)` 单函数版 —— 提交队列和遍历录制都收在一个函数里。
 > 验收标准那一栏一个字没改，偏离记在这儿。
->
-> **W5 还欠一件事**：见下面「OpenGL 遗留登记」，那三条还没清。
 
 ### 画面验收欠账登记
 
@@ -283,9 +281,6 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 
 | 归哪周 | 位置 | 原逻辑 | 现状 |
 |---|---|---|---|
-| **W5** | `WindowsWindow.cpp` `OnUpdate()` | `m_Context->SwapBuffers();` —— OpenGL 的 present | 已注释 |
-| **W5** | `WindowsWindow.cpp` `Init()` | `SetVSync(true);` | 已注释 |
-| **W5** | `WindowsWindow.cpp` `SetVSync()` | `glfwSwapInterval(1/0)` | 已注释。Vulkan 侧对应交换链的 `VulkanSwapChain.cpp:81` `choosePresentMode` |
 | **M6** | `Application.cpp` 构造函数 | `m_ImGuiLayer = new ImGuiLayer(); PushOverlay(...)` | 已注释。`ImGuiLayer::OnAttach` 走 `InitForOpenGL` + `OpenGL3_Init`（`ImGuiLayer.cpp:48-49`），窗口现在是 `GLFW_NO_API` 没 GL context |
 | **M6** | `Application.cpp` `run()` | `m_ImGuiLayer->Begin() / End()` | 已改成判空跳过 |
 | **M6** | `Application.h:33` | `ImGuiLayer* m_ImGuiLayer;`（**原来没初始化**） | 改成 `= nullptr`，判空要靠它 |
@@ -293,11 +288,10 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | 彻底删 OpenGL | `Renderer/GraphicsContext.h`、`Platform/OpenGL/OpenGLContext.{h,cpp}` | 现在没有使用者，还没删 | 留着 |
 | 彻底删 OpenGL | `Fish/src/Platform/OpenGL/` 其余 12 个文件、`CMakeLists.txt` 里的 `glad` | | 留着 |
 
-> **归到 W5 的理由**：present 和 VSync 都属"帧模型"，W5 那格写的就是它。
->
-> **2026-09-26：W5 已经标完成，但上面那三条还没清。** 现在 `WindowsWindow.cpp`
-> 里那三处仍是注释掉的原实现（`:3` / `:53` / `:162` / `:172`）。
-> 表里说"做对应那一周时清掉"，所以这是**欠着的**——归到 W5 的账没结完。
+> **2026-09-26：归 W5 那三条已清。** `WindowsWindow.cpp` 里注释掉的原实现
+> （`SwapBuffers` / `SetVSync(true)` / `glfwSwapInterval`，加那段讲 GraphicsContext
+> 的注释）连同代码里的 `OPENGL 遗留` 标记一起去掉了。
+> 归到 W5 的账结完；剩下的都是 M6 的。
 > W4 的验收标准是「开窗 + clear 成纯色」，跟 present 有交叉 —— 但那是 W4 到时候的事，
 > **不提前改 W4 的定义**（见下面的「不要提前」）。
 
