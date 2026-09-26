@@ -32,6 +32,18 @@ namespace Fish {
 
 
     Application::~Application() {
+        // 先销毁 layer,再关渲染后端。
+        //
+        // layer 里握着 GPU 资源(顶点缓冲、索引缓冲、贴图、shader),它们的析构
+        // 要调 vkDestroy*。而 m_LayerStack 是 Application 的成员,成员析构发生在
+        // 析构函数体【之后】—— 不显式清一次,顺序就是"设备先没,资源后销毁",
+        // 结果全泄漏。验证层会在 vkDestroyDevice 时报
+        // VUID-vkDestroyDevice-device-05137,而正常退出时它只打一遍,很容易漏看。
+        //
+        // 中间那次 WaitIdle 不能省:最后一帧的命令缓冲还在飞,它引用着 layer 的
+        // 顶点缓冲和贴图。不等就销毁,验证层报 VUID-vkDestroyBuffer-buffer-00922。
+        Renderer::WaitIdle();
+        m_LayerStack.Clear();
         Renderer::Shutdown();
     }
 

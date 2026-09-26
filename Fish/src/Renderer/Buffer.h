@@ -90,10 +90,10 @@ namespace Fish{
 	public:
 		virtual ~VertexBuffer(){}
 
-		virtual void Bind() const = 0;
-		virtual void UnBind() const = 0;
-
-		static VertexBuffer* Create(float* vertices, uint32_t size);
+		// 空实现而不是纯虚:Vulkan 侧绑定是录制期的一条 vkCmdBindVertexBuffers,
+		// 不是状态切换。等 Platform/OpenGL/ 整批下线时连这两个一起删。
+		virtual void Bind() const {}
+		virtual void UnBind() const {}
 
 		virtual const BufferLayout& GetLayout() const = 0;
 		virtual void SetLayout(const BufferLayout& layout) = 0;
@@ -104,11 +104,10 @@ namespace Fish{
 	public:
 		virtual ~IndexBuffer() {}
 
-		virtual void Bind() const = 0;
-		virtual void UnBind() const = 0;
+		// 理由同 VertexBuffer
+		virtual void Bind() const {}
+		virtual void UnBind() const {}
 		virtual uint32_t GetCount() const = 0;
-
-		static IndexBuffer* Create(uint32_t* indices, uint32_t count);
 	};
 
 }

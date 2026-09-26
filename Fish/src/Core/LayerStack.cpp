@@ -7,9 +7,15 @@ namespace Fish {
 	}
 
 	LayerStack::~LayerStack() {
+		Clear();
+	}
+
+	void LayerStack::Clear() {
 		for (Layer* Layer : m_Layers) {
 			delete Layer;
 		}
+		m_Layers.clear();
+		m_LayerInsertIndex = 0;
 	}
 
 	//一个从后往前，一个从前往后，保证了overlayer一定在layer后面

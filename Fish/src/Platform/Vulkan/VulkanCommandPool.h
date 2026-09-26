@@ -5,7 +5,6 @@
 #include "VulkanContext.h"
 #include "VulkanBuffer.h"
 #include "VulkanSwapChain.h"
-#include "VulkanPipeline.h"
 
 #include <cstdint>
 #include <vector>
@@ -33,10 +32,4 @@ namespace Fish {
 
 	vk::raii::CommandBuffer beginSingleTimeCommands(VulkanContext* context, CommandPool& transientPool);
 	void endSingleTimeCommands(VulkanContext* context, vk::raii::CommandBuffer& commandBuffer);
-
-	void recordCommandBuffer(vk::raii::CommandBuffer& commandBuffer,
-		SwapChain& swapChain, uint32_t imageIndex, Pipeline& pipeline,
-		const Buffer& vertexBuffer, const std::vector<Vertex>& vertices,
-		const Buffer& indexBuffer, const std::vector<uint16_t>& indices,
-		vk::raii::DescriptorSet& descriptorSet);
 }

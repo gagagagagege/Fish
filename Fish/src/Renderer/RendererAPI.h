@@ -1,6 +1,9 @@
 #pragma once
 #include"glm/glm.hpp"
 #include "VertexArray.h"
+#include "DrawItem.h"
+
+#include <vector>
 
 namespace Fish {
 	class RendererAPI
@@ -24,12 +27,31 @@ namespace Fish {
 
 		virtual void SetClearColor(const glm::vec4& color) = 0;
 
+		// 等 GPU 空转。销毁应用层持有的 GPU 资源之前必须调 —— 最后一帧的命令
+		// 缓冲还引用着顶点缓冲和贴图,不等它们用完就销毁,验证层会报
+		// VUID-vkDestroyBuffer-buffer-00922 / VUID-vkDestroySampler-sampler-01082。
+		//
+		// 放在 RendererAPI 上而不是让 Application 直接碰 device:那是后端细节,
+		// Application 不该知道是 Vulkan。空实现给待删的 OpenGLRendererAPI 用。
+		virtual void WaitIdle() {}
+
 		// 一帧的全部:acquire -> 录 -> submit -> present。Clear() 没有单独的调用 ——
 		// 动态渲染下清屏是 beginRendering 的 clearValue,用 SetClearColor 的值。
+		//
+		// items 是各 layer 这一帧 Submit 攒下的,每项自带 shader / 缓冲 / 贴图 /
+		// 颜色 / 变换 / viewProjection。Submit 只入队、不碰命令缓冲,
+		// 命令缓冲只在这里开着。
+		//
 		// 非纯虚是为了待删的 OpenGLRendererAPI 还能实例化。
-		virtual void DrawFrame() {}
+		virtual void DrawFrame(const std::vector<DrawItem>& items)
+		{
+			(void)items;
+		}
 
-		virtual void DrawIndexed(const Ref<VertexArray>& vertexArray) = 0;
+		// 老的立即绘制接口。Submit 改成只入队之后引擎里没有调用者了,
+		// 只剩 OpenGL 侧那个 override —— 等 Platform/OpenGL/ 整批下线时一起删。
+		// 空实现而不是纯虚,理由同 Shader::Bind。
+		virtual void DrawIndexed(const Ref<VertexArray>& vertexArray) {}
 
 		static const API GetAPI() { return s_API; }
 	private:

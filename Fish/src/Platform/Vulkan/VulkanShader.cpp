@@ -1,7 +1,10 @@
 #include "VulkanShader.h"
 
-#include <stdexcept>
+#include "VulkanContext.h"
+#include "VulkanDescriptorAllocator.h"
+
 #include <cstring>
+#include <stdexcept>
 
 namespace Fish {
 	std::vector<char> shader::readFile(const std::string& filename)
@@ -27,5 +30,26 @@ namespace Fish {
 		createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
 
 		return vk::raii::ShaderModule(device, createInfo);
+	}
+
+	VulkanShader::VulkanShader(VulkanContext* context, DescriptorAllocator& descriptorAllocator,
+		const std::string& name, const std::string& path)
+		: m_name(name)
+	{
+		const std::vector<char> code = shader::readFile(path);
+		if (code.empty())
+			throw std::runtime_error("VulkanShader: 读不到 " + path);
+		if (code.size() % sizeof(uint32_t) != 0)
+			throw std::runtime_error("VulkanShader: " + path + " 的大小不是 4 的倍数,不是 SPIR-V");
+
+		// 反射要的是 uint32_t 的指令流,而 readFile 给的是字节
+		std::vector<uint32_t> words(code.size() / sizeof(uint32_t));
+		std::memcpy(words.data(), code.data(), code.size());
+
+		descriptorAllocator.AddShaderBindings(context, ReflectDescriptorBindings(words).bindings);
+
+		m_vertexInput = ReflectVertexInput(words, m_vertexEntry.c_str());
+
+		m_module = shader::createShaderModule(code, context->device);
 	}
 }

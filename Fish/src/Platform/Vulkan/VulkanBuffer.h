@@ -12,32 +12,18 @@ namespace Fish {
 	class VulkanContext;
 	class CommandPool;
 
-	struct Vertex {
-		glm::vec2 pos;
-		glm::vec3 color;
-		glm::vec2 texCoord;
-
-		// TODO(重构): 这两个描述的是渲染侧的顶点布局,不属于通用 Buffer 的职责。
-		// 暂时寄放在这里以便 vertexBuffer 类下线; 等 Vertex/mesh 独立成头文件后再迁走。
-		static vk::VertexInputBindingDescription getBindingDescription();
-		static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions();
-	};
-
 	class Buffer
 	{
 	public:
-		// 空 Buffer: 句柄为 null,可被移动赋值覆盖,析构安全。
-		// 用于 TriangleApp 这类需要先声明、后初始化的成员。
 		Buffer() = default;
 		Buffer(vk::DeviceSize size, vk::BufferUsageFlags usage, const vk::MemoryPropertyFlags& properties, VulkanContext* context);
 		~Buffer() { unmap(); }
 
 		void copyBuffer(const vk::raii::Buffer& srcBuffer, CommandPool& transientPool);
 
-		static Buffer createVertexBuffer(const std::vector<Vertex>& vertices, VulkanContext* context, CommandPool& transientPool);
-		static Buffer createIndexBuffer(const std::vector<uint16_t>& indices, VulkanContext* context, CommandPool& transientPool);
+		static Buffer createDeviceLocal(const void* data, vk::DeviceSize size,
+			vk::BufferUsageFlags usage, VulkanContext* context, CommandPool& transientPool);
 
-		// 内存类型查询只依赖物理设备,不依赖 context,故保持裸句柄入参(texture 侧也在用)
 		static uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties, vk::raii::PhysicalDevice& physicalDevice);
 		
 		vk::raii::Buffer& getHandle() { return m_buffer; }

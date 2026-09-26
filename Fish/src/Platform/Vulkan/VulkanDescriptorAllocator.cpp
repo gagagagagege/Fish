@@ -1,75 +1,171 @@
 #include "VulkanDescriptorAllocator.h"
 
-#include <array>
-#include <chrono>
-#include <vector>
+#include <algorithm>
+#include <stdexcept>
+#include <string>
 
 namespace Fish {
-	DescriptorAllocator::DescriptorAllocator(VulkanContext* context, uint32_t maxSets)
-		: m_context(context)
-	{
-		// layout 定形状:两个 binding,UBO 给顶点阶段,贴图给片元阶段
-		std::array<vk::DescriptorSetLayoutBinding, 2> bindings{
-			{{.binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex},
-			 {.binding = 1, .descriptorType = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment}} };
+	namespace {
 
-		vk::DescriptorSetLayoutCreateInfo layoutInfo{ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() };
-		m_layout = vk::raii::DescriptorSetLayout(context->device, layoutInfo);
+		vk::DescriptorType AsDynamic(vk::DescriptorType type)
+		{
+			if (type == vk::DescriptorType::eUniformBuffer)
+				return vk::DescriptorType::eUniformBufferDynamic;
+			if (type == vk::DescriptorType::eStorageBuffer)
+				return vk::DescriptorType::eStorageBufferDynamic;
+			return type;
+		}
 
-		// 池的配额必须覆盖 layout 里出现的每一种类型,否则分配时
-		// vkAllocateDescriptorSets 报 VK_ERROR_OUT_OF_POOL_MEMORY
-		std::array<vk::DescriptorPoolSize, 2> poolSize{ {{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = maxSets},
-												{.type = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = maxSets}} };
-		vk::DescriptorPoolCreateInfo          poolInfo{ .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-													   .maxSets = maxSets,
-													   .poolSizeCount = static_cast<uint32_t>(poolSize.size()),
-													   .pPoolSizes = poolSize.data() };
-		m_pool = vk::raii::DescriptorPool(context->device, poolInfo);
 	}
 
-	vk::raii::DescriptorSet DescriptorAllocator::allocate(Buffer& ubo,
-		vk::raii::ImageView& textureView, vk::raii::Sampler& textureSampler) const
+	void DescriptorAllocator::AddShaderBindings(VulkanContext* context,
+		const std::vector<ReflectedDescriptorBindings::Binding>& bindings)
 	{
-		std::vector<vk::DescriptorSetLayout> layouts{ *m_layout };
+		m_context = context;
+
+		if (m_layoutFrozen)
+			throw std::runtime_error("DescriptorAllocator: layout 已经被引用出去"
+				"(分配过描述符集,或者有谁拿走了 layoutHandles),不能再改 —— "
+				"shader 必须在第一次绘制之前全部创建");
+
+		bool grew = false;
+		for (const ReflectedDescriptorBindings::Binding& incoming : bindings) {
+			auto existing = std::ranges::find_if(m_bindings,
+				[&](const ReflectedDescriptorBindings::Binding& b) {
+					return b.set == incoming.set && b.binding == incoming.binding;
+				});
+
+			if (existing == m_bindings.end()) {
+				m_bindings.push_back(incoming);
+				grew = true;
+			}
+			else if (existing->type != incoming.type) {
+				throw std::runtime_error("DescriptorAllocator: set " + std::to_string(incoming.set) +
+					" binding " + std::to_string(incoming.binding) +
+					" 被声明成了两种不同的描述符类型");
+			}
+			else if (existing->stages != incoming.stages) {
+				existing->stages |= incoming.stages;
+				grew = true;
+			}
+		}
+
+		if (!grew)
+			return;
+
+		std::ranges::sort(m_bindings, [](const auto& a, const auto& b) {
+			return a.set != b.set ? a.set < b.set : a.binding < b.binding;
+			});
+
+		BuildLayout();
+	}
+
+	void DescriptorAllocator::BuildLayout()
+	{
+		const uint32_t setCount = m_bindings.empty() ? 0 : m_bindings.back().set + 1;
+
+		std::vector<vk::raii::DescriptorSetLayout> layouts;
+		layouts.reserve(setCount);
+
+		for (uint32_t set = 0; set < setCount; ++set) {
+			std::vector<vk::DescriptorSetLayoutBinding> layoutBindings;
+			for (const ReflectedDescriptorBindings::Binding& binding : m_bindings) {
+				if (binding.set != set)
+					continue;
+				layoutBindings.push_back({
+					.binding = binding.binding,
+					.descriptorType = AsDynamic(binding.type),
+					.descriptorCount = binding.count,
+					.stageFlags = binding.stages
+					});
+			}
+
+			vk::DescriptorSetLayoutCreateInfo layoutInfo{
+				.bindingCount = static_cast<uint32_t>(layoutBindings.size()),
+				.pBindings = layoutBindings.data() };
+			layouts.emplace_back(m_context->device, layoutInfo);
+		}
+
+		m_layouts = std::move(layouts);
+	}
+
+	std::vector<vk::DescriptorSetLayout> DescriptorAllocator::layoutHandles()
+	{
+		m_layoutFrozen = true;
+
+		std::vector<vk::DescriptorSetLayout> handles;
+		handles.reserve(m_layouts.size());
+		for (const vk::raii::DescriptorSetLayout& layout : m_layouts) {
+			handles.push_back(*layout);
+		}
+		return handles;
+	}
+
+	void DescriptorAllocator::BuildPool(uint32_t maxSets)
+	{
+		std::vector<vk::DescriptorPoolSize> poolSizes;
+		for (const ReflectedDescriptorBindings::Binding& binding : m_bindings) {
+			const vk::DescriptorType type = AsDynamic(binding.type);
+			const uint32_t count = binding.count * maxSets;
+
+			auto existing = std::ranges::find(poolSizes, type, &vk::DescriptorPoolSize::type);
+			if (existing != poolSizes.end())
+				existing->descriptorCount += count;
+			else
+				poolSizes.push_back({ .type = type, .descriptorCount = count });
+		}
+
+		vk::DescriptorPoolCreateInfo poolInfo{
+			.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+			.maxSets = maxSets,
+			.poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+			.pPoolSizes = poolSizes.data() };
+		m_pool = vk::raii::DescriptorPool(m_context->device, poolInfo);
+	}
+
+	vk::raii::DescriptorSet DescriptorAllocator::allocateSet(uint32_t set)
+	{
+		if (m_layouts.empty())
+			throw std::runtime_error("DescriptorAllocator: 还没有 shader 登记过绑定,layout 不存在");
+		if (set >= m_layouts.size())
+			throw std::runtime_error("DescriptorAllocator: set " + std::to_string(set) +
+				" 没有任何 shader 声明过");
+
+		if (m_pool == nullptr)
+			BuildPool(k_DescriptorSetBudget);
+
+		// 池一建出来就有 set 引用着 layout 了,从此不能再重建
+		m_layoutFrozen = true;
+
+		std::vector<vk::DescriptorSetLayout> layouts{ *m_layouts[set] };
 		vk::DescriptorSetAllocateInfo        allocInfo{ .descriptorPool = *m_pool,
 													   .descriptorSetCount = 1,
 													   .pSetLayouts = layouts.data() };
 
-		// 分配 1 个再 move 出来。vk::raii::DescriptorSets 只是 std::vector 的子类、
-		// 没有析构函数,被搬走的那个元素在 vector 里变成空句柄,临时对象析构时跳过它。
-		vk::raii::DescriptorSet descriptorSet = std::move(m_context->device.allocateDescriptorSets(allocInfo).front());
-
-		vk::DescriptorBufferInfo bufferInfo{ .buffer = ubo.getHandle(), .offset = 0, .range = sizeof(UniformBufferObject) };
-		vk::DescriptorImageInfo  imageInfo{ .sampler = textureSampler, .imageView = textureView, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
-		std::array<vk::WriteDescriptorSet, 2> descriptorWrites{ {{.dstSet = descriptorSet,
-															 .dstBinding = 0,
-															 .dstArrayElement = 0,
-															 .descriptorCount = 1,
-															 .descriptorType = vk::DescriptorType::eUniformBuffer,
-															 .pBufferInfo = &bufferInfo},
-															{.dstSet = descriptorSet,
-															 .dstBinding = 1,
-															 .dstArrayElement = 0,
-															 .descriptorCount = 1,
-															 .descriptorType = vk::DescriptorType::eCombinedImageSampler,
-															 .pImageInfo = &imageInfo}} };
-		m_context->device.updateDescriptorSets(descriptorWrites, {});
-
-		return descriptorSet;
+		return std::move(m_context->device.allocateDescriptorSets(allocInfo).front());
 	}
 
-	void updateUniformBuffer(const vk::Extent2D& extent, Buffer& ubo)
+	void DescriptorAllocator::writeUniformBuffer(vk::raii::DescriptorSet& set, uint32_t binding,
+		const vk::DescriptorBufferInfo& info) const
 	{
-		static auto startTime = std::chrono::high_resolution_clock::now();
+		vk::WriteDescriptorSet write{
+			.dstSet = *set,
+			.dstBinding = binding,
+			.descriptorCount = 1,
+			.descriptorType = vk::DescriptorType::eUniformBufferDynamic,
+			.pBufferInfo = &info };
+		m_context->device.updateDescriptorSets(write, nullptr);
+	}
 
-		auto currentTime = std::chrono::high_resolution_clock::now();
-		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
-		UniformBufferObject data{};
-		data.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		data.view = lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		data.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(extent.width) / static_cast<float>(extent.height), 0.1f, 10.0f);
-		data.proj[1][1] *= -1;
-		memcpy(ubo.map(0, sizeof(data)), &data, sizeof(data));
+	void DescriptorAllocator::writeCombinedImageSampler(vk::raii::DescriptorSet& set, uint32_t binding,
+		const vk::DescriptorImageInfo& info) const
+	{
+		vk::WriteDescriptorSet write{
+			.dstSet = *set,
+			.dstBinding = binding,
+			.descriptorCount = 1,
+			.descriptorType = vk::DescriptorType::eCombinedImageSampler,
+			.pImageInfo = &info };
+		m_context->device.updateDescriptorSets(write, nullptr);
 	}
 }

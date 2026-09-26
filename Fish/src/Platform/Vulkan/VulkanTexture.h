@@ -16,6 +16,9 @@ namespace Fish {
 		static texture loadFromFile(VulkanContext* context, CommandPool& transientPool, const char* path);
 
 		Image&               getImage() { return m_image; }
+		// VulkanTexture2D::GetWidth() 是 const 的,而 texture 挂在它身上 ——
+		// 没有这个重载,const 成员函数里调不到 getImage()。
+		const Image&         getImage() const { return m_image; }
 		vk::raii::ImageView& getView() { return m_image.getView(); }
 		vk::raii::Sampler&   getSampler() { return m_sampler; }
 

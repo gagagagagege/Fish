@@ -7,23 +7,6 @@
 #include <cstring>
 
 namespace Fish {
-	// TODO(重构): 随 Vertex 一起迁出 buffer.h,见 buffer.h 中的说明
-	vk::VertexInputBindingDescription Vertex::getBindingDescription()
-	{
-		vk::VertexInputBindingDescription bindingDescription{};
-		bindingDescription.binding = 0;
-		bindingDescription.stride = sizeof(Vertex);
-		bindingDescription.inputRate = vk::VertexInputRate::eVertex;
-		return bindingDescription;
-	}
-
-	std::array<vk::VertexInputAttributeDescription, 3> Vertex::getAttributeDescriptions()
-	{
-		return { {{.location = 0, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, pos)},
-				 {.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color)},
-				 {.location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, texCoord)}} };
-	}
-
 	Buffer::Buffer(vk::DeviceSize size, vk::BufferUsageFlags usage, const vk::MemoryPropertyFlags& properties, VulkanContext* context):m_size(size),m_context(context)
 	{
 		vk::BufferCreateInfo bufferInfo{};
@@ -53,34 +36,17 @@ namespace Fish {
 		// 临时命令缓冲随 transientPool 销毁时一并释放
 	}
 
-	Buffer Buffer::createVertexBuffer(const std::vector<Vertex>& vertices, VulkanContext* context, CommandPool& transientPool)
+	Buffer Buffer::createDeviceLocal(const void* data, vk::DeviceSize size,
+		vk::BufferUsageFlags usage, VulkanContext* context, CommandPool& transientPool)
 	{
-		vk::DeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+		Buffer stagingBuffer(size, vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, context);
 
-		Buffer stagingBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, context);
-
-		void* data = stagingBuffer.map(0, bufferSize);
-		memcpy(data, vertices.data(), (size_t)bufferSize);
+		memcpy(stagingBuffer.map(0, size), data, static_cast<size_t>(size));
 		stagingBuffer.unmap();
 
-		Buffer dstBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal, context);
-		dstBuffer.copyBuffer(stagingBuffer.getHandle(), transientPool);
-
-		return dstBuffer;
-	}
-
-	Buffer Buffer::createIndexBuffer(const std::vector<uint16_t>& indices, VulkanContext* context, CommandPool& transientPool)
-	{
-		vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
-
-		Buffer stagingBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, context);
-
-		void* data = stagingBuffer.map(0, bufferSize);
-		memcpy(data, indices.data(), (size_t)bufferSize);
-		stagingBuffer.unmap();
-
-		Buffer dstBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal, context);
-
+		Buffer dstBuffer(size, vk::BufferUsageFlagBits::eTransferDst | usage,
+			vk::MemoryPropertyFlagBits::eDeviceLocal, context);
 		dstBuffer.copyBuffer(stagingBuffer.getHandle(), transientPool);
 
 		return dstBuffer;

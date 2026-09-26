@@ -20,7 +20,8 @@ public:
 
 private:
 	Fish::Ref<Fish::Shader> m_Shader = nullptr;
-	Fish::Ref<Fish::VertexArray> m_SquareVA = nullptr;
+	Fish::Ref<Fish::VertexBuffer> m_SquareVB = nullptr;
+	Fish::Ref<Fish::IndexBuffer>  m_SquareIB = nullptr;
 	Fish::OrthographicCameraController m_CameraController;
 	glm::vec4 m_SquareColor = { 0.2f, 0.3f, 0.8f, 1.0f };
 };

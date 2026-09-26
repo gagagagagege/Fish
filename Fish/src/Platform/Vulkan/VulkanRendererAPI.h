@@ -11,10 +11,12 @@
 #include "VulkanCommandPool.h"
 #include "VulkanDescriptorAllocator.h"
 #include "VulkanFrameData.h"
-#include "VulkanPipeline.h"
+#include "VulkanPipelineCache.h"
 #include "VulkanTexture.h"
+#include "VulkanTextureDescriptorCache.h"
 
 #include <memory>
+#include <optional>
 
 namespace Fish {
 	class VulkanRendererAPI : public RendererAPI
@@ -26,8 +28,8 @@ namespace Fish {
 		virtual void Init(void* nativeWindow) override;
 		virtual void NotifyWindowResized() override;
 		virtual void SetClearColor(const glm::vec4& color) override;
-		virtual void DrawFrame() override;
-		virtual void DrawIndexed(const Ref<VertexArray>& vertexArray) override;
+		virtual void WaitIdle() override;
+		virtual void DrawFrame(const std::vector<DrawItem>& items) override;
 
 	public:
 		vk::raii::Context                m_Context;
@@ -39,14 +41,17 @@ namespace Fish {
 
 		SwapChain           m_SwapChain;
 		DescriptorAllocator m_DescriptorAllocator;
-		Pipeline            m_Pipeline;
+		// 后两个都只能等 shader 创建出来才存在(shader 是应用层的 layer 建的,
+		// 比 Init 晚),所以推迟到第一次 DrawFrame 才建。见 EnsureRenderState。
+		std::optional<PipelineCache>          m_PipelineCache;
+		std::optional<TextureDescriptorCache> m_TextureSets;
 		CommandPool         m_CommandPool;
-		CommandPool         m_TransientPool; 
-		texture             m_MainTexture;
+		CommandPool         m_TransientPool;
 		Frames              m_Frames;
 
 	private:
 		void createInstance();
+		void EnsureRenderState();
 
 		GLFWwindow* m_Window = nullptr;
 

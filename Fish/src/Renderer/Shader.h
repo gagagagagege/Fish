@@ -1,7 +1,5 @@
 #pragma once
 #include<string>
-#include"glm/glm.hpp"
-#include <unordered_map>
 
 namespace Fish {
 	class Shader {
@@ -10,25 +8,9 @@ namespace Fish {
 
 		virtual const std::string& GetName() const = 0;
 
-		static Ref<Shader> Create(const std::string& filepath);
-		static Ref<Shader> Create(const std::string& name, const std::string& vertexSrc, const std::string& fragmentSrc);
-		virtual void Bind()const = 0;
-		virtual void UnBind()const = 0;
-
-	};
-
-	class ShaderLibrary
-	{
-	public:
-		void Add(const std::string& name, const Ref<Shader>& shader);
-		void Add(const Ref<Shader>& shader);
-		Ref<Shader> Load(const std::string& filepath);
-		Ref<Shader> Load(const std::string& name, const std::string& filepath);
-
-		Ref<Shader> Get(const std::string& name);
-
-		bool Exists(const std::string& name) const;
-	private:
-		std::unordered_map<std::string, Ref<Shader>> m_Shaders;
+		// 空实现而不是纯虚:Vulkan 里没有"绑定 shader"这个状态(管线在录制时才 bind),
+		// 新子类不该为了满足接口去写空重写。等 Platform/OpenGL/ 整批下线时连这两个一起删。
+		virtual void Bind()const {}
+		virtual void UnBind()const {}
 	};
 }

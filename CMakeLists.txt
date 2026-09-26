@@ -84,10 +84,36 @@ target_sources(Fish PRIVATE
     Fish/vendor/stb_image/stb_image.cpp
 )
 
+# SPIRV-Reflect 同理。Vulkan 后端用它反射顶点布局和描述符布局
+# （SPIR-V 里没有 vertex binding 号和 stride，那两样由调用方给）。
+# 从 Vulkan SDK 的 Source/SPIRV-Reflect 拷来，Apache 2.0。
+# SDK 的 Lib/ 下有预编译的 spirv-reflect-static.lib，但 find_package(Vulkan)
+# 没有暴露对应 target，所以走源码。
+target_sources(Fish PRIVATE
+    Fish/vendor/SPIRV-Reflect/spirv_reflect.h
+    Fish/vendor/SPIRV-Reflect/spirv_reflect.c
+)
+
+# target_precompile_headers 会给本 target 下所有源文件加 /FI fspch.h，
+# 而 fspch.h 里是 STL —— C 编译器吃到 yvals_core.h 会报 STL1003。
+# 只给这一个 .c 关掉。
+set_source_files_properties(Fish/vendor/SPIRV-Reflect/spirv_reflect.c
+    PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+
+# spirv_reflect.h 默认按 SDK 自己的目录布局找 "./include/spirv/unified1/spirv.h"，
+# 那是 SDK source 树里的相对路径，拷出来就断了。定义这个走系统头，
+# 即 SDK 的 Include/spirv/unified1/spirv.h —— 它跟着 Vulkan::Vulkan 的
+# include 路径一起进来。不另外拷一份：spirv.h 必须和 vulkan_core.h 同版本。
+target_compile_definitions(Fish PRIVATE SPIRV_REFLECT_USE_SYSTEM_SPIRV_H)
+
 # 设置包含目录
 target_include_directories(Fish PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Fish/src>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Fish/vendor/stb_image>
+)
+# PRIVATE：只有 Vulkan 后端用，不向 Playground 传播
+target_include_directories(Fish PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Fish/vendor/SPIRV-Reflect>
 )
 
 target_compile_definitions(Fish PRIVATE GLFW_INCLUDE_NONE)

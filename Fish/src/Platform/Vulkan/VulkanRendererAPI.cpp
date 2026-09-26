@@ -1,6 +1,9 @@
 #include "VulkanRendererAPI.h"
 
 #include "VulkanSurface.h"
+#include "VulkanShader.h"
+#include "VulkanVertexBuffer.h"
+#include "VulkanTexture2D.h"
 
 #include <stdexcept>
 #include <cstring>
@@ -53,30 +56,43 @@ namespace Fish {
 
 		m_SwapChain = SwapChain(m_DeviceContext.get(), m_Window);
 
-		m_DescriptorAllocator = DescriptorAllocator(m_DeviceContext.get(), k_MaxFramesInFlight);
-
-		const std::vector<vk::DynamicState> dynamicStates = {
-			vk::DynamicState::eViewport,
-			vk::DynamicState::eScissor
-		};
-		m_Pipeline = Pipeline(m_DeviceContext.get(), dynamicStates, m_SwapChain.imageFormat(), m_DescriptorAllocator.layout());
-
 		m_CommandPool   = CommandPool(m_DeviceContext.get());
 		m_TransientPool = CommandPool(m_DeviceContext.get());
 
-		m_MainTexture = texture::loadFromFile(m_DeviceContext.get(), m_TransientPool,
-			"Fish/src/Platform/Vulkan/textures/texture.jpg");
+		m_Frames = Frames(k_MaxFramesInFlight, m_DeviceContext.get(), m_CommandPool);
+	}
 
-		m_Frames = Frames(k_MaxFramesInFlight, m_DeviceContext.get(), m_CommandPool, m_DescriptorAllocator,
-			m_MainTexture.getView(), m_MainTexture.getSampler());
+	// 管线缓存、贴图 set 缓存和每个帧槽的描述符集都推迟到这里 —— 它们都依赖
+	// 描述符 layout,而那个要等应用层创建第一个 shader。一个 shader 都没有就
+	// 直接返回:这一帧本来也没东西可画。
+	void VulkanRendererAPI::EnsureRenderState()
+	{
+		if (!m_DescriptorAllocator.hasLayout())
+			return;
+
+		m_Frames.EnsureDescriptorSets(m_DescriptorAllocator);
+
+		const vk::Format swapChainFormat = m_SwapChain.imageFormat();
+
+		if (m_PipelineCache.has_value()) {
+			if (m_PipelineCache->swapChainFormat() != swapChainFormat)
+				m_PipelineCache->Invalidate(swapChainFormat);
+			return;
+		}
+
+		m_TextureSets.emplace(m_DeviceContext.get(), m_DescriptorAllocator);
+		m_PipelineCache.emplace(m_DeviceContext.get(),
+			m_DescriptorAllocator.layoutHandles(),
+			std::vector<vk::PushConstantRange>{ vk::PushConstantRange{
+				.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+				.offset = 0,
+				.size = sizeof(PushConstants) } },
+			swapChainFormat);
 	}
 
 	VulkanRendererAPI::~VulkanRendererAPI()
 	{
-		// 必须等 GPU 空转再析构 —— 最后一帧的 submit / present 可能还在飞,
-		// 不等就会去销毁正被 queue 使用的 fence / 信号量 / 命令缓冲 / 交换链。
-		// (原型 TriangleApp::cleanUp 里就是这么写的,搬过来时漏了)
-		// 函数体先于成员析构执行,所以这里所有 vk::raii 成员还活着。
+		// 必须等 GPU 空转再析构
 		if (m_DeviceContext) {
 			m_DeviceContext->device.waitIdle();
 		}
@@ -131,8 +147,17 @@ namespace Fish {
 		m_ClearColor = color;
 	}
 
-	void VulkanRendererAPI::DrawFrame()
+	void VulkanRendererAPI::WaitIdle()
 	{
+		if (m_DeviceContext) {
+			m_DeviceContext->device.waitIdle();
+		}
+	}
+
+	void VulkanRendererAPI::DrawFrame(const std::vector<DrawItem>& items)
+	{
+		EnsureRenderState();
+
 		// 重建放在 acquire 之前 —— 之后重建会把刚 acquire 到的图像丢掉。
 		if (m_FramebufferResized) {
 			m_FramebufferResized = false;
@@ -145,12 +170,12 @@ namespace Fish {
 			throw std::runtime_error("failed to wait for in-flight fence");
 		}
 
+		frame.EnsureUboCapacity(m_DescriptorAllocator, static_cast<uint32_t>(items.size()));
+
 		auto [result, imageIndex] = m_SwapChain.handle().acquireNextImage(
 			UINT64_MAX, *frame.presentCompleteSemaphore(), nullptr);
 
 		if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eErrorSurfaceLostKHR) {
-			// 这一帧没图可画,整个丢掉。acquire 和 present 在同一个函数里,
-			// 直接 return 不会破坏什么配对关系 —— 拆成 Begin/End 时才会。
 			m_SwapChain.recreate();
 			return;
 		}
@@ -170,7 +195,7 @@ namespace Fish {
 			vk::AccessFlagBits::eNone, vk::AccessFlagBits::eColorAttachmentWrite,
 			vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eColorAttachmentOutput);
 
-		// 清屏在这里发生:动态渲染没有 render pass,载入行为靠 loadOp + clearValue。
+		// 清屏在这里
 		vk::RenderingAttachmentInfo colorAttachment{};
 		colorAttachment.imageView = *m_SwapChain.imageView(imageIndex);
 		colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
@@ -199,7 +224,94 @@ namespace Fish {
 		scissor.extent = extent;
 		commandBuffer.setScissor(0, scissor);
 
-		// 这里以后是各 layer 攒下的 draw 命令 —— Submit 只入队,不碰命令缓冲。
+		// 各 layer 攒下的绘制项在这里录成命令。
+		//
+		// 管线 / 顶点缓冲 / 索引缓冲 / 贴图都是"变了才发" —— 绑定在命令缓冲里
+		// 是持久的,重复发同一个东西只是白占命令缓冲,执行时驱动还要重走一遍。
+		// set 0 例外,每项都发:它的 dynamic offset 每个物体都不同,去重不了。
+		vk::Pipeline boundPipeline = nullptr;
+		const void*  boundVertexBuffer = nullptr;
+		const void*  boundIndexBuffer = nullptr;
+		const void*  boundTexture = nullptr;
+
+		// 环形缓冲的写游标归零。放在这儿而不是帧开头是安全的:到这个点已经
+		// 等过这个帧槽的 fence,GPU 不再读它那块 UBO 了。
+		frame.ResetObjects();
+
+		for (const DrawItem& item : items) {
+			// Submit 收的是 Fish 的抽象类型,这里降到后端实现。
+			// 转不出来说明那个绘制项的 shader 不是 Vulkan 的 —— 跳过,
+			// 而不是拿空指针往下走。
+			auto shader = std::dynamic_pointer_cast<VulkanShader>(item.shader);
+			FS_CORE_ASSERT(shader, "DrawItem.shader 不是 Vulkan 的");
+			if (!shader)
+				continue;
+
+			auto vertexBuffer = std::dynamic_pointer_cast<VulkanVertexBuffer>(item.vertexBuffer);
+			FS_CORE_ASSERT(vertexBuffer, "DrawItem.vertexBuffer 不是 Vulkan 的");
+			if (!vertexBuffer)
+				continue;
+
+			auto indexBuffer = std::dynamic_pointer_cast<VulkanIndexBuffer>(item.indexBuffer);
+			if (item.indexBuffer) {
+				FS_CORE_ASSERT(indexBuffer, "DrawItem.indexBuffer 不是 Vulkan 的");
+				if (!indexBuffer)
+					continue;
+			}
+
+			PipelineDesc desc{
+				.vertexModule   = shader->module(),
+				.fragmentModule = shader->module(),
+				.vertexEntry    = shader->vertexEntry(),
+				.fragmentEntry  = shader->fragmentEntry(),
+				.vertexStride   = vertexBuffer->stride()
+			};
+			vk::raii::Pipeline& pipeline = m_PipelineCache->GetOrCreate(desc, shader->vertexInput());
+			if (*pipeline != boundPipeline) {
+				commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
+				boundPipeline = *pipeline;
+			}
+
+			const PushConstants pushConstants{ .viewProj = item.viewProjection };
+			commandBuffer.pushConstants<PushConstants>(m_PipelineCache->layout(),
+				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
+
+			const uint32_t dynamicOffset = frame.PushObjectUbo(item.transform, item.color);
+			commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+				m_PipelineCache->layout(), k_ObjectUboSet, *frame.descriptorSet(), dynamicOffset);
+
+			// 没有贴图的绘制项不绑 set 1 —— 它的管线不采样。
+			// boundTexture 不复位:描述符集绑定是持久的,set 1 还绑着上一次那张,
+			// 换回来的时候不用重绑。
+			if (item.texture) {
+				auto texture = std::dynamic_pointer_cast<VulkanTexture2D>(item.texture);
+				FS_CORE_ASSERT(texture, "DrawItem.texture 不是 Vulkan 的");
+				if (texture && texture.get() != boundTexture) {
+					vk::raii::DescriptorSet& textureSet = m_TextureSets->GetOrCreate(
+						texture->getTexture().getView(), texture->getTexture().getSampler());
+					commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+						m_PipelineCache->layout(), k_TextureSet, *textureSet, nullptr);
+					boundTexture = texture.get();
+				}
+			}
+
+			if (vertexBuffer.get() != boundVertexBuffer) {
+				commandBuffer.bindVertexBuffers(0, *vertexBuffer->buffer().getHandle(), { 0 });
+				boundVertexBuffer = vertexBuffer.get();
+			}
+
+			if (indexBuffer) {
+				if (indexBuffer.get() != boundIndexBuffer) {
+					commandBuffer.bindIndexBuffer(*indexBuffer->buffer().getHandle(), 0,
+						vk::IndexType::eUint32);
+					boundIndexBuffer = indexBuffer.get();
+				}
+				commandBuffer.drawIndexed(indexBuffer->GetCount(), 1, 0, 0, 0);
+			}
+			else {
+				commandBuffer.draw(vertexBuffer->count(), 1, 0, 0);
+			}
+		}
 
 		commandBuffer.endRendering();
 
@@ -243,8 +355,4 @@ namespace Fish {
 		m_Frames.advance();
 	}
 
-	void VulkanRendererAPI::DrawIndexed(const Ref<VertexArray>& vertexArray)
-	{
-		throw std::runtime_error("VulkanRendererAPI::DrawIndexed not implemented yet (needs the W6 pipeline)");
-	}
 }
