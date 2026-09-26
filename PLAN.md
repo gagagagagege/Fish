@@ -220,13 +220,13 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | W1 | 09/14 – 09/20 | git 整理（两个仓库）、简历初稿、M1 开工 | 两仓库都有首次提交；`Buffer` 骨架能编译 | ✅ 完成 |
 | W2 | 09/21 – 09/27 | **M1 完成** | vulkan_project 跑起来，旋转贴图四边形正常；6 个调用点全改成类构造；**开始投日常实习** | ✅ 完成 |
 | W3 | 09/28 – 10/04 | 源码搬进 `Fish/src/Platform/Vulkan/` + 加 `Vulkan` 前缀<br>`VulkanRendererAPI` 骨架 + 接进 `Renderer` | 空实现能编译链接 | ✅ 完成 |
-| W4 | 10/05 – 10/11 | `VulkanRendererAPI` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 | 🔵 进行中 |
-| W5 | 10/12 – 10/18 | `VulkanRendererAPI : RendererAPI`；帧模型 | `BeginFrame/EndFrame` 跑通，每帧 clear | ⬜ 未开始 |
-| W6 | 10/19 – 10/25 | 顶点/索引缓冲抽象；pipeline 创建 | 静态图形能画出来 | ⬜ 未开始 |
-| W7 | 10/26 – 11/01 | **M3**；swapchain 重建接入 `onWindowResize` | **三角形走通 `Renderer::Submit`**；resize 不崩 | ⬜ 未开始 |
-| W8 | 11/02 – 11/08 | `VulkanShader : Shader`；uniform / descriptor 抽象 | shader 和 uniform 走 Fish 的抽象 | ⬜ 未开始 |
-| W9 | 11/09 – 11/15 | **M4**：`VulkanTexture2D : Texture2D` | 贴图四边形走 `Renderer::Submit` | ⬜ 未开始 |
-| W10 | 11/16 – 11/22 | Renderer2D 设计（看 Hazel，**不抄**） | 设计草稿：顶点组织、批处理策略、flush 条件 | ⬜ 未开始 |
+| W4 | 10/05 – 10/11 | `VulkanRendererAPI` 完整（**国庆，可冲刺**） | Fish 能开窗 + clear 成纯色 | ✅ 完成 |
+| W5 | 10/12 – 10/18 | `VulkanRendererAPI : RendererAPI`；帧模型 | `BeginFrame/EndFrame` 跑通，每帧 clear | ✅ 完成 · 形状不同，见下注 |
+| W6 | 10/19 – 10/25 | 顶点/索引缓冲抽象；pipeline 创建 | 静态图形能画出来 | ✅ 完成 |
+| W7 | 10/26 – 11/01 | **M3**；swapchain 重建接入 `onWindowResize` | **三角形走通 `Renderer::Submit`**；resize 不崩 | ✅ 完成 |
+| W8 | 11/02 – 11/08 | `VulkanShader : Shader`；uniform / descriptor 抽象 | shader 和 uniform 走 Fish 的抽象 | ✅ 完成 |
+| W9 | 11/09 – 11/15 | **M4**：`VulkanTexture2D : Texture2D` | 贴图四边形走 `Renderer::Submit` | ✅ 完成 |
+| W10 | 11/16 – 11/22 | Renderer2D 设计（看 Hazel，**不抄**） | 设计草稿：顶点组织、批处理策略、flush 条件 | 🔵 进行中 |
 | W11 | 11/23 – 11/29 | Renderer2D 实现：攒 quad、flush、per-frame 顶点缓冲 | 单个 quad 能画出来 | ⬜ 未开始 |
 | W12 | 11/30 – 12/06 | **M5：Renderer2D 完成** | 1000+ 精灵批处理、帧率稳定；**commit + push + 录 demo 截图** | ⬜ 未开始 |
 | W13 | 12/07 – 12/13 | **弹性周**（补欠 / 提前调研 bindless） | 前面落后的在这里补齐 | ⬜ 未开始 |
@@ -236,6 +236,16 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | W17 | 01/04 – 01/10 | 收尾：demo 视频、README、过程文档 | 三件套齐 | ⬜ 未开始 |
 | W18 | 01/11 – 01/17 | 缓冲 + 提前批准备 | 简历定稿、内推已铺、项目讲解稿（3 分钟版 + 10 分钟版） | ⬜ 未开始 |
 
+> **W1–W9 是 2026-09-26 一次结清的**，当时日期还在 W2 里（提前约 7 周）。
+> 那天从 `39a1f0d` 起把 2026-09-23 那轮按复演敲定的形状重做了一遍，
+> 之后 404 个绘制项一路画到屏幕上。
+>
+> **W5 的形状和计划不一样**：计划写的是 `BeginFrame/EndFrame` 拆开，
+> 实际做的是 `DrawFrame(items)` 单函数版 —— 提交队列和遍历录制都收在一个函数里。
+> 验收标准那一栏一个字没改，偏离记在这儿。
+>
+> **W5 还欠一件事**：见下面「OpenGL 遗留登记」，那三条还没清。
+
 ### 画面验收欠账登记
 
 > 由 **2026-09-23 的决定**产生：**按后端建立顺序和 Fish 链接，暂时不做画面上的验收。**
@@ -244,18 +254,27 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 > **上面那栏「验收标准」一个字都没改** —— 照旧写着"能画出来"。实际交付时只做到
 > "链路通 + 验证层干净"，差的部分记在这里。**结账时把对应行删掉。**
 
+**W4 / W5 / W6 / W7 / W9 这五行 2026-09-26 结清、已删。** 那天跑通之后逐项确认过：
+
+| 被降级的周 | 实际做到 |
+|---|---|
+| W4 | 开窗 ✅ / 后端对象全建出来 ✅ / 干净退出 ✅ / **clear ✅**（画面上底色是设定的 `0.1,0.1,0.1`） |
+| W5 | `DrawFrame(items)` 单函数版跑通 ✅ / 逐帧 clear + present ✅ / **画面 ✅** |
+| W6 | **静态图形画出来了 ✅** —— 404 个绘制项,网格 + 三角形 + 两张贴图 + 第二个 layer 的方块 |
+| W7 | **三角形 ✅**（白色、不透明,说明 stride 28 那条管线的顶点属性前缀和是对的）；**resize ✅ 真人拖过**；最小化 / 还原 ✅ |
+| W9 | **两张不同的贴图 ✅**（棋盘格 + Cherno logo,说明每张贴图各一个 set 1） |
+
+还剩两行没做：
+
 | 归哪周 | 被降级的周 | 原验收标准 | 实际做到 |
 |---|---|---|---|
-| | W4 | Fish 能开窗 + clear 成纯色 | 开窗 ✅ / 后端对象全建出来 ✅ / 干净退出 ✅ / **clear 没验** |
-| | W5 | BeginFrame/EndFrame 跑通，每帧 clear | 跑通 ✅（`DrawFrame` 单函数版，13 秒 12120 帧）/ clear + present 每帧在做 / **画面没看** |
-| | W6 | 静态图形能画出来 | |
-| | W7 | 三角形走通 `Renderer::Submit`；resize 不崩 | resize 那条**已单独验过**，见下 |
-| | W9 | 贴图四边形走 Renderer::Submit | |
 | | W11 | 单个 quad 能画出来 | |
 | | W12 | 1000+ 精灵批处理、帧率稳定；commit + push + 录 demo 截图 | |
 
 **「归哪周」这一列是空的 —— 画面欠账集中到哪一周结，那一格要你自己定。**
-定之前，「实际做到」那列每做完一周填一次。不依赖画面的验收（比如 W7 的 resize）照旧单独验。
+
+**验证的边界**（2026-09-26）：上面这些是"看四样东西都在、位置和颜色对"级别的确认，
+**不是逐像素比对**。帧率、批处理效率、大场景下的表现都没测。W11/W12 的验收要另说。
 
 ### OpenGL 遗留登记
 
@@ -270,11 +289,15 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 | **M6** | `Application.cpp` 构造函数 | `m_ImGuiLayer = new ImGuiLayer(); PushOverlay(...)` | 已注释。`ImGuiLayer::OnAttach` 走 `InitForOpenGL` + `OpenGL3_Init`（`ImGuiLayer.cpp:48-49`），窗口现在是 `GLFW_NO_API` 没 GL context |
 | **M6** | `Application.cpp` `run()` | `m_ImGuiLayer->Begin() / End()` | 已改成判空跳过 |
 | **M6** | `Application.h:33` | `ImGuiLayer* m_ImGuiLayer;`（**原来没初始化**） | 改成 `= nullptr`，判空要靠它 |
-| **W8/W9** | `Playground/src/Playground.cpp` `Playground()` | `PushLayer(new ExampleLayer())` / `PushLayer(new playground2D())` | 已注释。两个 layer 构造函数里全是 OpenGL 对象，撞 `Shader.cpp:14` 的断言。等 W8/W9 的适配类做完放回来 |
+| ~~**W8/W9**~~ | `Playground/src/Playground.cpp` `Playground()` | `PushLayer(new ExampleLayer())` / `PushLayer(new playground2D())` | **2026-09-26 已清**：两个 layer 改成走 `Renderer::Create*` + `Submit(DrawItem{...})`，放回来了 |
 | 彻底删 OpenGL | `Renderer/GraphicsContext.h`、`Platform/OpenGL/OpenGLContext.{h,cpp}` | 现在没有使用者，还没删 | 留着 |
 | 彻底删 OpenGL | `Fish/src/Platform/OpenGL/` 其余 12 个文件、`CMakeLists.txt` 里的 `glad` | | 留着 |
 
 > **归到 W5 的理由**：present 和 VSync 都属"帧模型"，W5 那格写的就是它。
+>
+> **2026-09-26：W5 已经标完成，但上面那三条还没清。** 现在 `WindowsWindow.cpp`
+> 里那三处仍是注释掉的原实现（`:3` / `:53` / `:162` / `:172`）。
+> 表里说"做对应那一周时清掉"，所以这是**欠着的**——归到 W5 的账没结完。
 > W4 的验收标准是「开窗 + clear 成纯色」，跟 present 有交叉 —— 但那是 W4 到时候的事，
 > **不提前改 W4 的定义**（见下面的「不要提前」）。
 

@@ -30,7 +30,38 @@
 差在哪:
 ```
 
-*(还没有条目)*
+### 2026-09-26 · 回退后重做:先给应用层提供资源创建的接口
+
+我打算怎么做:先给应用层提供资源创建的接口
+
+我预期会发生什么:应用层可以开始创建资源
+
+我不确定的地方:会牵扯到其他组件的初始化时机
+
+<!-- 收尾时补 -->
+实际是什么:四个 `Renderer::Create*` 立起来只是个开头 —— 它把整条渲染路径一路带了出来。
+按顺序:shader 换成 flat_color + texture(`ObjectUbo{model,color}` 进 UBO、
+`PushConstants{viewProj}` 走推送常量)、描述符 layout 改成从 shader 反射的并集、
+管线换成按 PipelineDesc 缓存的池、贴图挪去 set 1 并加 TextureDescriptorCache、
+帧槽加环形缓冲 + dynamic offset、最后在 DrawFrame 里写录制循环。
+现在 404 个绘制项能画出来,验证层 0 输出,退出干净。
+
+差在哪:第三行说中了方向,但**范围估小了一档** —— "初始化时机"只是其中一条,还有:
+
+① `layout 从 shader 来` 一落地,layout / pool / pipeline layout / 管线**全部**得
+   延迟到第一次 DrawFrame,于是有了 `EnsureRenderState`;
+② `贴图和 UBO 分两个 set` 不是可选项 —— 挤在 set 0 里"贴图变了才绑"就没有落点;
+③ **退出路径(目标 7)是被这一步逼出来的**:在这之前引擎不持有任何应用层资源,
+   析构顺序错了也看不出来。第一次有 layer 握着 GPU 资源,`~Application` 只调
+   `Shutdown()` 的问题就暴露了(23 个对象泄漏 + `vulkan_raii.hpp:13703` 断言 + 挂住)。
+
+另外两件没预料到的:
+
+- 用户那版"帧开头检查 + 单缓冲"**不需要双缓冲** —— `DrawFrame` 收到 items 时就知道
+  这一帧要画几项,检查点放在 `waitForFences` 之后就是安全的。
+- `VulkanCommandPool` 里挂着原型时代的 `recordCommandBuffer`(0 调用者),是删
+  `Vertex` 才把它带出来的。
+差在哪:
 
 ---
 

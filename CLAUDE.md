@@ -345,6 +345,28 @@ git show HEAD:src/xxx.cpp             # 只看单个文件
 - Vulkan 资源一律 `vk::raii`;裸句柄只在确实只依赖单个对象时用
 - 类名首字母大写(`Buffer` / `Image` / `FrameData`),函数名小写开头
 
+### 抽象基类不为 OpenGL 留形状(2026-09-26)
+
+原来写在基类上的纯虚函数,如果只有 OpenGL 侧有对应物(Vulkan 里没有"绑定"
+这个状态),处理方式是:
+
+| | |
+|---|---|
+| **不做的** | 新子类为了满足接口去写空重写(`void Bind() const override {}`) |
+| **做的** | 把基类那个纯虚改成**空实现**(`virtual void Bind() const {}`),基类函数暂时留着 |
+
+为什么留而不直接删:基类声明一删,`Fish/src/Platform/OpenGL/` 下那些
+`override` 立刻编不过,而那个目录在红线表里("删的时机要挑")。
+**等 OpenGL 遗留整批下线时,连基类函数带实现一起删。**
+
+已按这条改过的:`Shader::Bind/UnBind`、`Texture::Bind`、
+`VertexBuffer::Bind/UnBind`、`IndexBuffer::Bind/UnBind`。
+`VertexArray` 那对没动 —— 它按 目标 5 的 5.3d 本来就是待删的。
+
+**边界:判据是「Vulkan 侧有没有对应物」,不是「有没有人用」。**
+`Texture::GetWidth/GetHeight` 零调用者,但 Vulkan 侧有真实实现(返回 image extent),
+空实现只能 `return 0` —— 那是撒谎。所以这两个**留着**,不套这条规矩。
+
 ## 六、`vk::raii` 的坑
 
 > **每条都要带「怎么验的」**(头文件行号 / 命令 / VUID)。
