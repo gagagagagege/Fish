@@ -54,9 +54,6 @@ public:
 
 		Fish::Renderer::BeginScene(m_CameraController.GetCamera());
 
-		// 1. 400 个方块,共用同一条管线和一个顶点缓冲。
-		//    transform 和 color 都每物体一份,走 UBO 的 dynamic offset ——
-		//    所以 ImGui 那个颜色滑块现在真的有效。
 		const glm::vec4 color = glm::vec4(m_SquareColor, 1.0f);
 		glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.1f));
 
@@ -74,12 +71,6 @@ public:
 			}
 		}
 
-		// 2. 两个贴图方块。贴图是绘制项的参数,不是"先绑上再画" ——
-		//    Vulkan 里没有 Bind(slot) 那种全局状态。
-		//
-		// 四样东西(网格 / 两张贴图 / 三角形 / playground2D 那个方块)原本都在原点、
-		// 尺寸还互相盖住,而且没有深度缓冲 —— 一帧里只能看见最后画的那个。
-		// 所以分开摆:网格占 x,y ≥ 0,下面这条 y < 0 的带子留给它们四个。
 		Fish::Renderer::Submit({
 			.shader       = m_TextureShader,
 			.vertexBuffer = m_SquareVB,

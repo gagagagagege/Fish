@@ -158,7 +158,6 @@ namespace Fish {
 	{
 		EnsureRenderState();
 
-		// 重建放在 acquire 之前 —— 之后重建会把刚 acquire 到的图像丢掉。
 		if (m_FramebufferResized) {
 			m_FramebufferResized = false;
 			m_SwapChain.recreate();
@@ -224,11 +223,6 @@ namespace Fish {
 		scissor.extent = extent;
 		commandBuffer.setScissor(0, scissor);
 
-		// 各 layer 攒下的绘制项在这里录成命令。
-		//
-		// 管线 / 顶点缓冲 / 索引缓冲 / 贴图都是"变了才发" —— 绑定在命令缓冲里
-		// 是持久的,重复发同一个东西只是白占命令缓冲,执行时驱动还要重走一遍。
-		// set 0 例外,每项都发:它的 dynamic offset 每个物体都不同,去重不了。
 		vk::Pipeline boundPipeline = nullptr;
 		const void*  boundVertexBuffer = nullptr;
 		const void*  boundIndexBuffer = nullptr;
@@ -239,9 +233,6 @@ namespace Fish {
 		frame.ResetObjects();
 
 		for (const DrawItem& item : items) {
-			// Submit 收的是 Fish 的抽象类型,这里降到后端实现。
-			// 转不出来说明那个绘制项的 shader 不是 Vulkan 的 —— 跳过,
-			// 而不是拿空指针往下走。
 			auto shader = std::dynamic_pointer_cast<VulkanShader>(item.shader);
 			FS_CORE_ASSERT(shader, "DrawItem.shader 不是 Vulkan 的");
 			if (!shader)
@@ -345,7 +336,6 @@ namespace Fish {
 
 		if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR
 			|| result == vk::Result::eErrorSurfaceLostKHR) {
-			// 下帧开头重建,不在这里做。
 			m_FramebufferResized = true;
 		}
 		else if (result != vk::Result::eSuccess) {

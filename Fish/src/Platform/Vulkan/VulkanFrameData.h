@@ -50,12 +50,10 @@ namespace Fish {
 
 		uint32_t PushObjectUbo(const glm::mat4& model, const glm::vec4& color);
 
-		//移动语义--------------
 		FrameData(const FrameData&) = delete;
 		FrameData& operator=(const FrameData&) = delete;
 		FrameData(FrameData&&) = default;
 		FrameData& operator=(FrameData&&) = default;
-		//-----------------------
 
 	private:
 		void CreateUbo(uint32_t capacity);

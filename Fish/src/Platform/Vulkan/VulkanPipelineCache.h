@@ -80,12 +80,9 @@ namespace Fish {
 
 		vk::Format swapChainFormat() const { return m_swapChainFormat; }
 
-		// 交换链 format 变了就整体作废 —— 旧的永远命不中,留着只占显存。
-		// 调用点在 VulkanRendererAPI::EnsureRenderState。
 		void Invalidate(vk::Format newFormat);
 
 	private:
-		// 声明顺序 = 销毁逆序:pipeline 引用 layout 的句柄,所以 map 在 layout 前面。
 		std::unordered_map<PipelineDesc, vk::raii::Pipeline, PipelineDescHash> m_pipelines;
 		vk::raii::PipelineLayout m_layout = nullptr;
 
