@@ -25,9 +25,10 @@ namespace Fish {
 		glm::vec4 color;
 		glm::vec2 uv;
 		uint32_t  texId;
+		float     tilingFactor;
 	};
 
-	inline constexpr uint32_t k_BatchVertexStride = 40;
+	inline constexpr uint32_t k_BatchVertexStride = 44;
 
 	// glm 的 aligned 宏一旦打开,vec4 的对齐会把后面所有字段推走,而反射的前缀和
 	// 是按紧凑排布算的 —— 两边错开,而 BuildVertexInput 只检查总和不超 stride,
@@ -37,6 +38,7 @@ namespace Fish {
 	static_assert(offsetof(BatchVertex, color) == 12,    "color 不在 offset 12");
 	static_assert(offsetof(BatchVertex, uv) == 28,       "uv 不在 offset 28");
 	static_assert(offsetof(BatchVertex, texId) == 36,    "texId 不在 offset 36");
+	static_assert(offsetof(BatchVertex, tilingFactor) == 40, "tilingFactor 不在 offset 40");
 
 	//批的key里面没有viewProjection,两个layer viewProjection不同时会报
 	struct DrawBatch
@@ -46,6 +48,7 @@ namespace Fish {
 		glm::mat4   transform = glm::mat4(1.0f);
 		glm::vec4   color = glm::vec4(1.0f);
 		uint32_t    texId = 0;
+		float       tilingFactor = 1.0f;
 		glm::mat4   viewProjection = glm::mat4(1.0f);
 	};
 }

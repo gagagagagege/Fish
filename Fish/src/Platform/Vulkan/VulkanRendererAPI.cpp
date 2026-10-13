@@ -37,10 +37,11 @@ namespace Fish {
 			auto emit = [&](const float local[2], const float uv[2]) {
 				const glm::vec4 p = batch.transform * glm::vec4(local[0], local[1], 0.0f, 1.0f);
 				out.push_back(BatchVertex{
-					.position = glm::vec3(p),
-					.color    = batch.color,
-					.uv       = glm::vec2(uv[0], uv[1]),
-					.texId    = batch.texId });
+					.position     = glm::vec3(p),
+					.color        = batch.color,
+					.uv           = glm::vec2(uv[0], uv[1]),
+					.texId        = batch.texId,
+					.tilingFactor = batch.tilingFactor });
 			};
 
 			if (batch.shape == BatchShape::Quad) {
@@ -112,7 +113,13 @@ namespace Fish {
 				" 越界,上限是 " + std::to_string(k_MaxTextures));
 		}
 		if (m_BatchTextureUsed[slot]) {
-			throw std::runtime_error("纹理库槽位 " + std::to_string(slot) + " 已经被占了");
+			// 同一张贴图重复登记同一个槽是幂等的,直接放过。判据比的是 imageView
+			// (纹理对象身份,对齐 Hazel 那个 operator==),不是路径 —— 同一个 png
+			// 建出两个对象仍然算两张。
+			if (m_BatchTextureInfos[slot].imageView == *tex.getView())
+				return;
+			// 换一张来占已经占了的槽不放过:texId 照样指得到这个槽,会静默采到先登记那张。
+			throw std::runtime_error("纹理库槽位 " + std::to_string(slot) + " 已经被另一张贴图占了");
 		}
 		// 库是一次写完的,写完就不再动 —— 再登记进来的贴图不会出现在 set 里,
 		// 而顶点里的 texId 照样指得到那个槽位,读到的是空描述符。
