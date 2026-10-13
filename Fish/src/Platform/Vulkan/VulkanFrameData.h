@@ -81,6 +81,9 @@ namespace Fish {
 
 		FrameData&       current() { return m_frames[m_current]; }
 
+		// 批的顶点缓冲每槽一份,写的时候要挑当前这槽 —— 见 VulkanRendererAPI::BatchBuffer。
+		uint32_t         currentIndex() const { return m_current; }
+
 		void advance() { m_current = (m_current + 1) % static_cast<uint32_t>(m_frames.size()); }
 
 		void EnsureDescriptorSets(DescriptorAllocator& descriptorAllocator);

@@ -5,6 +5,7 @@
 #include <GLFW/glfw3.h>
 
 #include "Renderer/RendererAPI.h"
+#include "Renderer/DrawBatch.h"
 #include "VulkanValidationLayers.h"
 #include "VulkanContext.h"
 #include "VulkanSwapChain.h"
@@ -15,8 +16,10 @@
 #include "VulkanTexture.h"
 #include "VulkanTextureDescriptorCache.h"
 
+#include <array>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace Fish {
 	class VulkanRendererAPI : public RendererAPI
@@ -30,6 +33,9 @@ namespace Fish {
 		virtual void SetClearColor(const glm::vec4& color) override;
 		virtual void WaitIdle() override;
 		virtual void DrawFrame(const std::vector<DrawItem>& items) override;
+		virtual void SubmitBatch(const DrawBatch& batch) override;
+
+		void RegisterBatchTexture(uint32_t slot, texture& tex);
 
 	public:
 		vk::raii::Context                m_Context;
@@ -41,8 +47,6 @@ namespace Fish {
 
 		SwapChain           m_SwapChain;
 		DescriptorAllocator m_DescriptorAllocator;
-		// 后两个都只能等 shader 创建出来才存在(shader 是应用层的 layer 建的,
-		// 比 Init 晚),所以推迟到第一次 DrawFrame 才建。见 EnsureRenderState。
 		std::optional<PipelineCache>          m_PipelineCache;
 		std::optional<TextureDescriptorCache> m_TextureSets;
 		CommandPool         m_CommandPool;
@@ -50,12 +54,36 @@ namespace Fish {
 		Frames              m_Frames;
 
 	private:
+		struct BatchBuffer
+		{
+			Buffer   buffer;
+			void*    mapped = nullptr;
+			uint32_t capacity = 0;      // 能装几个顶点
+		};
+
+		struct BatchState
+		{
+			std::vector<BatchVertex> vertices;                     
+			std::vector<BatchBuffer> frames;                      
+			Ref<Shader>              shader;                       
+			glm::mat4                viewProjection = glm::mat4(1.0f);
+		};
+
 		void createInstance();
 		void EnsureRenderState();
 
+		void EnsureBatchBuffer(BatchBuffer& target, uint32_t needed, uint32_t initial);
+		void EnsureBatchTextureLibrary();
+		void RecordBatches(vk::raii::CommandBuffer& commandBuffer);
+
+		std::array<BatchState, k_BatchShapeCount> m_Batches;
+
+		std::array<vk::DescriptorImageInfo, k_MaxTextures> m_BatchTextureInfos{};
+		std::array<bool, k_MaxTextures>                    m_BatchTextureUsed{};
+		vk::raii::DescriptorSet                            m_BatchTextureSet = nullptr;
+
 		GLFWwindow* m_Window = nullptr;
 
-		// DrawFrame 开头消费它。重建放在 acquire 之前,否则会把刚拿到的图像丢掉。
 		bool m_FramebufferResized = false;
 
 		glm::vec4 m_ClearColor = { 0.0f, 0.0f, 0.0f, 1.0f };

@@ -2,6 +2,7 @@
 #include"glm/glm.hpp"
 #include "VertexArray.h"
 #include "DrawItem.h"
+#include "DrawBatch.h"
 
 #include <vector>
 
@@ -46,6 +47,14 @@ namespace Fish {
 		virtual void DrawFrame(const std::vector<DrawItem>& items)
 		{
 			(void)items;
+		}
+
+		// 批处理那条路的提交口。和 Submit 一样只入队 —— 攒进后端持有的某个批里,
+		// 真正的绘制在 DrawFrame 的批处理段。非纯虚,理由同 DrawFrame:
+		// 待删的 OpenGLRendererAPI 还得能实例化。
+		virtual void SubmitBatch(const DrawBatch& batch)
+		{
+			(void)batch;
 		}
 
 		// 老的立即绘制接口。Submit 改成只入队之后引擎里没有调用者了,

@@ -30,6 +30,18 @@
 差在哪:
 ```
 
+### 2026-09-28 · 改投影矩阵修 y 翻转 + 四个投影参数改名
+
+我打算怎么做:纠正相机的创建函数让他符合 vulkan 的创建规则
+
+我预期会发生什么:相机移动,物体渲染位置重新正常
+
+我不确定的地方:加进来新的 y 轴设定不同的 api 的时候可能要调整
+
+<!-- 收尾时补 -->
+实际是什么:
+差在哪:
+
 ### 2026-09-26 · 回退后重做:先给应用层提供资源创建的接口
 
 我打算怎么做:先给应用层提供资源创建的接口
@@ -77,6 +89,11 @@
 | 4 | `Fish/src/Platform/Vulkan/VulkanFrameData.h:41` | 一个数字,和实际对不上 | 中等 | ⬜ |
 | 5 | `Fish/src/Platform/Vulkan/VulkanReflection.cpp:30-47` | 这段代码有一条路径从没被执行过 | 难 | ⬜ |
 | 6 | `Fish/src/Platform/Vulkan/VulkanSwapChain.cpp:127-133` + `Application.cpp:117` | 窗口状态有两条独立路径,其中一条是死的 | 难 | ⬜ |
+| 7 | `Fish/src/Renderer/OrthographicCamera.cpp:7,13` + `Renderer.cpp:21-23` | 这一层不知道后端是谁,但这里写死了某一个后端的约定 | 中等 | ⬜ |
+| 8 | `OpenGL/OpenGLTexture.cpp:12` + `Vulkan/VulkanTexture.cpp:22` | 同一件事在两处各做一遍,而且是同一个全局开关 | 中等 | ⬜ |
+| 9 | `Fish/src/Core/OrthographicCameraController.cpp:9,49,55` | 四个位置参数,两对的排列方向不一样 | 容易 | ⬜ |
+| 10 | `Fish/src/Platform/Vulkan/VulkanPipelineCache.h:44-45` | 这次改动动了绕序 | 中等 | ⬜ |
+| 11 | `VulkanPipelineCache.cpp:43` + `:60` | 这两行的输入,在场上现在只剩一个取值 | 容易 | ⬜ |
 
 **做题的方法**:先只看坐标,想清楚"会出什么事、什么条件下会出",再看下一行。
 

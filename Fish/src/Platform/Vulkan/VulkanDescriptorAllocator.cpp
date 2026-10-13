@@ -44,6 +44,14 @@ namespace Fish {
 					" binding " + std::to_string(incoming.binding) +
 					" 被声明成了两种不同的描述符类型");
 			}
+			// 数组长度必须比。不比的话后声明的那个被静默丢掉,layout 里的数组
+			// 偏短,越界读到的是隔壁 set 的内容 —— 建管线、建池子都不报错。
+			else if (existing->count != incoming.count) {
+				throw std::runtime_error("DescriptorAllocator: set " + std::to_string(incoming.set) +
+					" binding " + std::to_string(incoming.binding) + " 被声明成了 " +
+					std::to_string(existing->count) + " 和 " + std::to_string(incoming.count) +
+					" 两种数组长度");
+			}
 			else if (existing->stages != incoming.stages) {
 				existing->stages |= incoming.stages;
 				grew = true;
@@ -166,6 +174,24 @@ namespace Fish {
 			.descriptorCount = 1,
 			.descriptorType = vk::DescriptorType::eCombinedImageSampler,
 			.pImageInfo = &info };
+		m_context->device.updateDescriptorSets(write, nullptr);
+	}
+
+	// 批处理的纹理库用这个:一次写完整个数组绑定,从 firstElement 那格起。
+	// 分成 N 次单格写也行,但 dstArrayElement 要自己数,一次写更不容易错位。
+	void DescriptorAllocator::writeCombinedImageSamplers(vk::raii::DescriptorSet& set, uint32_t binding,
+		uint32_t firstElement, const std::vector<vk::DescriptorImageInfo>& infos) const
+	{
+		if (infos.empty())
+			return;
+
+		vk::WriteDescriptorSet write{
+			.dstSet = *set,
+			.dstBinding = binding,
+			.dstArrayElement = firstElement,
+			.descriptorCount = static_cast<uint32_t>(infos.size()),
+			.descriptorType = vk::DescriptorType::eCombinedImageSampler,
+			.pImageInfo = infos.data() };
 		m_context->device.updateDescriptorSets(write, nullptr);
 	}
 }

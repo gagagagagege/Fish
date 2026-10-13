@@ -108,11 +108,16 @@ namespace Fish {
         // Check if the physicalDevice supports the required features
         auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2,
             vk::PhysicalDeviceVulkan13Features,
-            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+            vk::PhysicalDeviceDescriptorIndexingFeatures>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
-            features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
+            features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
+            // 批处理那张贴图数组:索引来自顶点属性,所以是非一致的。
+            // descriptorBindingPartiallyBound 不在列表里 —— 库把每一格都写了,
+            // 用不上它,少一条硬特性就少一批选不出来的设备。
+            features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().shaderSampledImageArrayNonUniformIndexing;
 
         // Return true if the physicalDevice meets all the criteria
         return supportsVulkan1_3 && supportsGraphicsAndPresent && supportsAllRequiredExtensions && supportsRequiredFeatures;
@@ -140,10 +145,14 @@ namespace Fish {
         }
 
         // query for Vulkan 1.3 features
-        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
+        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features,
+            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT, vk::PhysicalDeviceDescriptorIndexingFeatures> featureChain = {
             {.features = {.samplerAnisotropy = true}},                   // vk::PhysicalDeviceFeatures2
             {.synchronization2 = true, .dynamicRendering = true},        // vk::PhysicalDeviceVulkan13Features
-            {.extendedDynamicState = true}                               // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+            {.extendedDynamicState = true},                              // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+            // 必须和上面 isDeviceSuitable 里那串检查一一对应 —— 少一条就是查了
+            // 一个链子里没开的字段,getFeatures2 那片内存是别的东西填的。
+            {.shaderSampledImageArrayNonUniformIndexing = true}          // vk::PhysicalDeviceDescriptorIndexingFeatures
         };
 
         // create a logical device

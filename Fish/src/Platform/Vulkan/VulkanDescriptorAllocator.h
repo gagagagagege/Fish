@@ -18,6 +18,10 @@ namespace Fish {
 	inline constexpr uint32_t k_TextureSet       = 1;
 	inline constexpr uint32_t k_TextureBinding   = 0;
 
+	inline constexpr uint32_t k_BatchTextureSet     = 2;
+	inline constexpr uint32_t k_BatchTextureBinding = 0;
+	inline constexpr uint32_t k_MaxTextures         = 64;
+
 	inline constexpr uint32_t k_DescriptorSetBudget = 128;
 
 	class DescriptorAllocator
@@ -41,6 +45,8 @@ namespace Fish {
 			const vk::DescriptorBufferInfo& info) const;
 		void writeCombinedImageSampler(vk::raii::DescriptorSet& set, uint32_t binding,
 			const vk::DescriptorImageInfo& info) const;
+		void writeCombinedImageSamplers(vk::raii::DescriptorSet& set, uint32_t binding,
+			uint32_t firstElement, const std::vector<vk::DescriptorImageInfo>& infos) const;
 
 		// 按 set 号升序的整套 layout。建 pipeline layout 时整份拿去。
 		// 非 const:调一次就把 layout 冻住 —— 交出去的是裸句柄,调用方会一直留着。

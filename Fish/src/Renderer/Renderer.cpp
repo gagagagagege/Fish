@@ -7,7 +7,16 @@
 #include"Platform/Vulkan/VulkanVertexBuffer.h"
 #include"Platform/Vulkan/VulkanTexture2D.h"
 
+#include <map>
+#include <utility>
+
 namespace Fish {
+
+	namespace {
+		// 同一个 (name, path) 只建一份 shader。
+		std::map<std::pair<std::string, std::string>, Ref<Shader>> s_ShaderCache;
+	}
+
 	RendererAPI* Renderer::s_RendererAPI = nullptr;
 
 	Renderer::SceneData* Renderer::s_SceneData = new Renderer::SceneData;
@@ -31,6 +40,8 @@ namespace Fish {
 
 	void Renderer::Shutdown()
 	{
+		s_ShaderCache.clear();
+
 		// 置空是为了让 Init 里那句 != nullptr 判断保持能重进的形状,单进程只会走一次。
 		delete s_RendererAPI;
 		s_RendererAPI = nullptr;
@@ -51,6 +62,12 @@ namespace Fish {
 	{
 		item.viewProjection = s_SceneData->ViewProjectionMatrix;
 		s_DrawQueue.push_back(std::move(item));
+	}
+
+	void Renderer::BatchingSubmit(DrawBatch batch)
+	{
+		batch.viewProjection = s_SceneData->ViewProjectionMatrix;
+		s_RendererAPI->SubmitBatch(batch);
 	}
 
 	void Renderer::SetClearColor(const glm::vec4& color)
@@ -76,18 +93,21 @@ namespace Fish {
 		}
 	}
 
-	// 下面几个都靠 dynamic_cast 拿后端的具体类型。
-	// 不往 RendererAPI 上加虚函数:那等于把"引擎有哪几种资源"写进后端接口,
-	// 加一种资源就要动所有实现(包括已经没人维护的 OpenGLRendererAPI)。
 	Ref<Shader> Renderer::CreateShader(const std::string& name, const std::string& spvPath)
 	{
+		const std::pair<std::string, std::string> key{ name, spvPath };
+		if (const auto it = s_ShaderCache.find(key); it != s_ShaderCache.end())
+			return it->second;
+
 		auto* vulkan = dynamic_cast<VulkanRendererAPI*>(s_RendererAPI);
 		FS_CORE_ASSERT(vulkan, "CreateShader 需要 Vulkan 后端");
 		if (!vulkan)
 			return nullptr;
 
-		return std::make_shared<VulkanShader>(vulkan->m_DeviceContext.get(),
+		Ref<Shader> shader = std::make_shared<VulkanShader>(vulkan->m_DeviceContext.get(),
 			vulkan->m_DescriptorAllocator, name, spvPath);
+		s_ShaderCache.emplace(key, shader);
+		return shader;
 	}
 
 	Ref<VertexBuffer> Renderer::CreateVertexBuffer(const void* data, size_t size, uint32_t stride)
@@ -112,14 +132,20 @@ namespace Fish {
 			vulkan->m_TransientPool, indices, count);
 	}
 
-	Ref<Texture2D> Renderer::CreateTexture2D(const std::string& path)
+	Ref<Texture2D> Renderer::CreateTexture2D(const std::string& path, uint32_t batchSlot)
 	{
 		auto* vulkan = dynamic_cast<VulkanRendererAPI*>(s_RendererAPI);
 		FS_CORE_ASSERT(vulkan, "CreateTexture2D 需要 Vulkan 后端");
 		if (!vulkan)
 			return nullptr;
 
-		return std::make_shared<VulkanTexture2D>(vulkan->m_DeviceContext.get(),
+		auto texture = std::make_shared<VulkanTexture2D>(vulkan->m_DeviceContext.get(),
 			vulkan->m_TransientPool, path);
+
+		// 后端的纹理库按槽位记 view/sampler,画批之前一次写进 set 2。
+		if (batchSlot != k_NoBatchTextureSlot)
+			vulkan->RegisterBatchTexture(batchSlot, texture->getTexture());
+
+		return texture;
 	}
 }

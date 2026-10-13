@@ -5,8 +5,11 @@
 #include "VulkanVertexBuffer.h"
 #include "VulkanTexture2D.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace Fish {
 
@@ -17,6 +20,40 @@ namespace Fish {
 			VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME
 		};
 		constexpr uint32_t k_MaxFramesInFlight = 2;
+
+		const float k_UnitQuad[4][2]     = { {-0.5f,-0.5f}, {0.5f,-0.5f}, {0.5f,0.5f}, {-0.5f,0.5f} };
+		const float k_UnitQuadUv[4][2]   = { {0.0f,0.0f}, {1.0f,0.0f}, {1.0f,1.0f}, {0.0f,1.0f} };
+
+		const uint32_t k_QuadOrder[6]    = { 0, 1, 2, 2, 3, 0 };
+
+		const float k_UnitTriangle[3][2]   = { {-0.5f,-0.5f}, {0.5f,-0.5f}, {0.0f,0.5f} };
+		const float k_UnitTriangleUv[3][2] = { {0.0f,0.0f}, {1.0f,0.0f}, {0.5f,1.0f} };
+
+		constexpr uint32_t k_InitialTriangleVertices = 3000;
+		constexpr uint32_t k_InitialQuadVertices     = 60000;
+
+		void AppendShapeVertices(std::vector<BatchVertex>& out, const DrawBatch& batch)
+		{
+			auto emit = [&](const float local[2], const float uv[2]) {
+				const glm::vec4 p = batch.transform * glm::vec4(local[0], local[1], 0.0f, 1.0f);
+				out.push_back(BatchVertex{
+					.position = glm::vec3(p),
+					.color    = batch.color,
+					.uv       = glm::vec2(uv[0], uv[1]),
+					.texId    = batch.texId });
+			};
+
+			if (batch.shape == BatchShape::Quad) {
+				for (uint32_t i = 0; i < 6; ++i) {
+					const uint32_t corner = k_QuadOrder[i];
+					emit(k_UnitQuad[corner], k_UnitQuadUv[corner]);
+				}
+			}
+			else {
+				for (uint32_t i = 0; i < 3; ++i)
+					emit(k_UnitTriangle[i], k_UnitTriangleUv[i]);
+			}
+		}
 
 		void transitionSwapImage(vk::raii::CommandBuffer& commandBuffer, vk::Image image,
 			vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
@@ -60,6 +97,105 @@ namespace Fish {
 		m_TransientPool = CommandPool(m_DeviceContext.get());
 
 		m_Frames = Frames(k_MaxFramesInFlight, m_DeviceContext.get(), m_CommandPool);
+
+		// 批的顶点缓冲每帧槽一份,槽数跟着帧在飞数走。真正的 Buffer 推迟到
+		// 第一次画那个批时才建 —— 那时才知道要多大。
+		for (BatchState& batch : m_Batches) {
+			batch.frames.resize(k_MaxFramesInFlight);
+		}
+	}
+
+	void VulkanRendererAPI::RegisterBatchTexture(uint32_t slot, texture& tex)
+	{
+		if (slot >= k_MaxTextures) {
+			throw std::runtime_error("纹理库槽位 " + std::to_string(slot) +
+				" 越界,上限是 " + std::to_string(k_MaxTextures));
+		}
+		if (m_BatchTextureUsed[slot]) {
+			throw std::runtime_error("纹理库槽位 " + std::to_string(slot) + " 已经被占了");
+		}
+		// 库是一次写完的,写完就不再动 —— 再登记进来的贴图不会出现在 set 里,
+		// 而顶点里的 texId 照样指得到那个槽位,读到的是空描述符。
+		if (m_BatchTextureSet != nullptr) {
+			throw std::runtime_error("纹理库已经定下来了,槽位 " + std::to_string(slot) +
+				" 登记得太晚 —— 所有贴图必须在第一次画批之前创建");
+		}
+
+		m_BatchTextureInfos[slot] = vk::DescriptorImageInfo{
+			.sampler     = tex.getSampler(),
+			.imageView   = tex.getView(),
+			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+		m_BatchTextureUsed[slot] = true;
+	}
+
+	void VulkanRendererAPI::SubmitBatch(const DrawBatch& batch)
+	{
+		BatchState& state = m_Batches[static_cast<uint32_t>(batch.shape)];
+
+		if (state.shader == nullptr) {
+			state.shader = batch.shader;
+			state.viewProjection = batch.viewProjection;
+		}
+		else {
+			FS_CORE_ASSERT(state.shader == batch.shader, "同一个批里两个 shader");
+			FS_CORE_ASSERT(state.viewProjection == batch.viewProjection,
+				"同一个批里的 viewProjection 不一致:一个批只能配一个相机");
+		}
+
+		AppendShapeVertices(state.vertices, batch);
+	}
+
+	void VulkanRendererAPI::EnsureBatchBuffer(BatchBuffer& target, uint32_t needed, uint32_t initial)
+	{
+		if (target.capacity >= needed)
+			return;
+
+		const uint32_t capacity = std::max(needed, std::max(initial, target.capacity * 2));
+
+		Buffer buffer(static_cast<vk::DeviceSize>(capacity) * sizeof(BatchVertex),
+			vk::BufferUsageFlagBits::eVertexBuffer,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			m_DeviceContext.get());
+
+		// 先 map 再搬。move 赋值会给旧的那份跑 unmap,mapped 必须在那之后才换。
+		// 旧缓冲不用拷内容 —— 每帧都从 offset 0 重写,它那点数据是死的。
+		void* mapped = buffer.map(0, buffer.getSize());
+		target.buffer = std::move(buffer);
+		target.mapped = mapped;
+		target.capacity = capacity;
+	}
+
+	void VulkanRendererAPI::EnsureBatchTextureLibrary()
+	{
+		if (m_BatchTextureSet != nullptr)
+			return;
+
+		m_BatchTextureSet = m_DescriptorAllocator.allocateSet(k_BatchTextureSet);
+
+		// 没登记的槽位也必须写一个合法的描述符进去。数组是按非一致索引取的,
+		// 验证层证明不了"那几格没被访问",只认"每一格都写过" —— 留空洞就是
+		// VUID-vkCmdDraw-None-08114,而且它拦不住,因为 descriptorBindingPartiallyBound
+		// 只是允许"未写",不允许"未写还被取"。
+		// 空洞填第一个登记过的贴图:正常的 texId 指不到那儿,填什么不影响画面。
+		vk::DescriptorImageInfo filler{};
+		for (uint32_t slot = 0; slot < k_MaxTextures; ++slot) {
+			if (m_BatchTextureUsed[slot]) {
+				filler = m_BatchTextureInfos[slot];
+				break;
+			}
+		}
+		if (filler.imageView == nullptr) {
+			throw std::runtime_error("批的纹理库一个槽位都没登记,顶点里的 texId 没有东西可指");
+		}
+
+		std::vector<vk::DescriptorImageInfo> infos(k_MaxTextures, filler);
+		for (uint32_t slot = 0; slot < k_MaxTextures; ++slot) {
+			if (m_BatchTextureUsed[slot])
+				infos[slot] = m_BatchTextureInfos[slot];
+		}
+
+		m_DescriptorAllocator.writeCombinedImageSamplers(m_BatchTextureSet,
+			k_BatchTextureBinding, 0, infos);
 	}
 
 	// 管线缓存、贴图 set 缓存和每个帧槽的描述符集都推迟到这里 —— 它们都依赖
@@ -154,6 +290,69 @@ namespace Fish {
 		}
 	}
 
+	// 批处理段:每个批一次管线绑定 + 一次 pushConstants + 一次 draw,没有逐项循环。
+	void VulkanRendererAPI::RecordBatches(vk::raii::CommandBuffer& commandBuffer)
+	{
+		if (!m_PipelineCache.has_value()) {
+			// 一个 shader 都没建过(EnsureRenderState 提前返回了)。数据是这一帧的,
+			// 清掉就行。
+			for (BatchState& state : m_Batches)
+				state.vertices.clear();
+			return;
+		}
+
+		const uint32_t slot = m_Frames.currentIndex();
+
+		for (uint32_t i = 0; i < k_BatchShapeCount; ++i) {
+			BatchState& state = m_Batches[i];
+			if (state.vertices.empty())
+				continue;
+
+			auto shader = std::dynamic_pointer_cast<VulkanShader>(state.shader);
+			FS_CORE_ASSERT(shader, "批的 shader 不是 Vulkan 的");
+			if (!shader)
+				continue;
+
+			const uint32_t vertexCount = static_cast<uint32_t>(state.vertices.size());
+			const uint32_t initial = (i == static_cast<uint32_t>(BatchShape::Triangle))
+				? k_InitialTriangleVertices : k_InitialQuadVertices;
+
+			// 扩容点在这里是安全的:进 DrawFrame 时已经等过当前帧槽的 fence,
+			// 这一槽上一轮的缓冲不再在飞,可以换掉。
+			BatchBuffer& target = state.frames[slot];
+			EnsureBatchBuffer(target, vertexCount, initial);
+
+			memcpy(target.mapped, state.vertices.data(),
+				static_cast<size_t>(vertexCount) * sizeof(BatchVertex));
+
+			const PipelineDesc desc{
+				.vertexModule   = shader->module(),
+				.fragmentModule = shader->module(),
+				.vertexEntry    = shader->vertexEntry(),
+				.fragmentEntry  = shader->fragmentEntry(),
+				.vertexStride   = k_BatchVertexStride
+			};
+			vk::raii::Pipeline& pipeline = m_PipelineCache->GetOrCreate(desc, shader->vertexInput());
+			commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
+
+			const PushConstants pushConstants{ .viewProj = state.viewProjection };
+			commandBuffer.pushConstants<PushConstants>(m_PipelineCache->layout(),
+				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
+
+			EnsureBatchTextureLibrary();
+			commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+				m_PipelineCache->layout(), k_BatchTextureSet, *m_BatchTextureSet, nullptr);
+
+			commandBuffer.bindVertexBuffers(0, *target.buffer.getHandle(), { 0 });
+			commandBuffer.draw(vertexCount, 1, 0, 0);
+		}
+
+		// 顶点已经进了 GPU 缓冲,CPU 侧这段这一帧不再需要。
+		for (BatchState& state : m_Batches)
+			state.vertices.clear();
+	}
+
+	//TODO: item循环里的dynamic_cast
 	void VulkanRendererAPI::DrawFrame(const std::vector<DrawItem>& items)
 	{
 		EnsureRenderState();
@@ -303,6 +502,9 @@ namespace Fish {
 				commandBuffer.draw(vertexBuffer->count(), 1, 0, 0);
 			}
 		}
+
+		// 批在 per-item 之后画。两条路并存,顺序是定死的:批里的东西盖在上面。
+		RecordBatches(commandBuffer);
 
 		commandBuffer.endRendering();
 
