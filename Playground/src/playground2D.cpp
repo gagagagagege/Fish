@@ -4,21 +4,26 @@
 
 playground2D::playground2D():Layer("Sandbox2D"), m_CameraController(1280.0f / 720.0f)
 {
-	m_Shader = Fish::Renderer::CreateShader("FlatColor",
-		"Fish/src/Platform/Vulkan/shaders/flat_color.spv");
+	m_Shader = Fish::Renderer::CreateShader("Texture",
+		"Fish/src/Platform/Vulkan/shaders/texture.spv");
 
-	// pos3,stride 12 —— 又一个和 ExampleLayer 那三条都不同的 stride
-	float squareVertices[3 * 4] = {
-		-0.5f, -0.5f, 0.0f,
-		 0.5f, -0.5f, 0.0f,
-		 0.5f,  0.5f, 0.0f,
-		-0.5f,  0.5f, 0.0f,
+	// 纯色方块也得走贴图管线,所以顶点补上 uv —— stride 12 → 20。
+	// 20 和 ExampleLayer 那个方块一样,两条共用一条管线。
+	float squareVertices[5 * 4] = {
+		-0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
+		 0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
+		 0.5f,  0.5f, 0.0f, 1.0f, 1.0f,
+		-0.5f,  0.5f, 0.0f, 0.0f, 1.0f,
 	};
 	uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
 
 	m_SquareVB = Fish::Renderer::CreateVertexBuffer(
-		squareVertices, sizeof(squareVertices), 3 * sizeof(float));
+		squareVertices, sizeof(squareVertices), 5 * sizeof(float));
 	m_SquareIB = Fish::Renderer::CreateIndexBuffer(squareIndices, 6);
+
+	// 每个 layer 各拿一张,layer 之间不互相引用。1×1 全白,采样恒为 1,
+	// 颜色全靠 ubo.color。
+	m_WhiteTexture = Fish::Renderer::CreateTexture2D("Playground/assets/textures/White.png");
 }
 
 void playground2D::OnAttach()
@@ -33,7 +38,7 @@ void playground2D::OnDetach()
 
 void playground2D::OnEvent(Fish::Event& e)
 {
-
+	m_CameraController.OnEvent(e);
 }
 
 void playground2D::OnUpdate(Fish::Timestep ts)
@@ -52,6 +57,7 @@ void playground2D::OnUpdate(Fish::Timestep ts)
 		.shader       = m_Shader,
 		.vertexBuffer = m_SquareVB,
 		.indexBuffer  = m_SquareIB,
+		.texture      = m_WhiteTexture,
 		.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(1.45f, -0.5f, 0.0f))
 		                * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
 		.color        = m_SquareColor });

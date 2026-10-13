@@ -18,6 +18,8 @@ namespace Fish {
 	texture texture::loadFromFile(VulkanContext* context, CommandPool& transientPool, const char* path)
 	{
 		int texWidth = 0, texHeight = 0, texChannels = 0;
+		// 和 OpenGLTexture.cpp:12 对齐。stb 默认首行是图片顶部,不翻的话贴图上下颠倒。
+		stbi_set_flip_vertically_on_load(1);
 		stbi_uc* pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, channels);
 		if (!pixels)
 		{

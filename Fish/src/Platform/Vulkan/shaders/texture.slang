@@ -2,7 +2,8 @@
 //
 // PushConstants 和 ObjectUbo 的布局必须和 flat_color.slang 完全一致 ——
 // 两个 shader 共用 PipelineCache 里那唯一一条 pipeline layout。
-// 这里的 color 不读,但布局要对齐。
+// color 现在要读 —— 纯色项也走这条管线,绑一张 1×1 白贴图,采样恒为 1,
+// 颜色全靠它给。两个 shader 的 ObjectUbo 布局还得一致,因为共用 pipeline layout。
 //
 // set 1,不是 set 0 —— UBO 占着 set 0,而两个必须分开:
 // UBO 每个物体都要换 dynamic offset 重绑(绑的是同一个 set,只是偏移不同),
@@ -43,5 +44,7 @@ VSOutput vertMain(VSInput input) {
 
 [shader("fragment")]
 float4 fragMain(VSOutput vertIn) : SV_TARGET {
-    return albedo.Sample(vertIn.fragTexCoord);
+    // 纯色项绑白贴图,采样恒为 1,颜色全由 ubo.color 给;
+    // 贴图项不设 color,拿的是 DrawItem 的默认值 vec4(1.0),乘上去不影响。
+    return albedo.Sample(vertIn.fragTexCoord) * ubo.color;
 }

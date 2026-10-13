@@ -6,18 +6,9 @@
 #include "Renderer/Shader.h"
 #include "VulkanReflection.h"
 
-#include <fstream>
 #include <string>
-#include <vector>
 
 namespace Fish {
-	class shader
-	{
-	public:
-		static std::vector<char> readFile(const std::string& filename);
-		static vk::raii::ShaderModule createShaderModule(const std::vector<char>& code, vk::raii::Device& device);
-	};
-
 	class VulkanContext;
 	class DescriptorAllocator;
 

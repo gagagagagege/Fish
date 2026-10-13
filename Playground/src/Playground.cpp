@@ -7,26 +7,24 @@
 #include"playground2D.h"
 #include"Core/EntryPoint.h"
 
-// 三个顶点缓冲的 stride 各不相同(12 / 20 / 28),走三条管线 ——
+// 所有绘制项都走 texture 那条 shader —— 纯色项靠绑一张 1×1 白贴图 +
+// ubo.color 出颜色。顶点一律 pos3 + uv2、stride 20,所以全场共用一条管线。
 // 管线按 (shader 模块, stride, 渲染状态) 缓存,顶点布局从 shader 反射出来。
-// 留一个三角形在这里就是为了让这条机制真的被走到。
 class ExampleLayer :public Fish::Layer {
 public:
 	ExampleLayer() :Layer("Example"), m_CameraController(1280.0f / 720.0f) {
 		const std::string shaderDir = "Fish/src/Platform/Vulkan/shaders/";
 		m_FlatColorShader = Fish::Renderer::CreateShader("FlatColor", shaderDir + "flat_color.spv");
 		m_TextureShader   = Fish::Renderer::CreateShader("Texture",   shaderDir + "texture.spv");
-
-		// 三角形:pos3 + color4,stride 28。flat_color 只读位置,颜色那 16 字节是多余的 ——
-		// 这正是"调用方给 stride"存在的理由:反射只能算出位置占 12 字节。
-		float triangleVertices[3 * 7] = {
-			-0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
-			 0.5f, -0.5f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f,
-			 0.0f,  0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f
+		//flat color
+		float triangleVertices[3 * 5] = {
+			-0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
+			 0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
+			 0.0f,  0.5f, 0.0f, 0.5f, 1.0f
 		};
 		uint32_t triangleIndices[3] = { 0, 1, 2 };
 		m_TriangleVB = Fish::Renderer::CreateVertexBuffer(
-			triangleVertices, sizeof(triangleVertices), 7 * sizeof(float));
+			triangleVertices, sizeof(triangleVertices), 5 * sizeof(float));
 		m_TriangleIB = Fish::Renderer::CreateIndexBuffer(triangleIndices, 3);
 
 		// 方块:pos3 + uv2,stride 20
@@ -43,6 +41,7 @@ public:
 
 		m_Texture     = Fish::Renderer::CreateTexture2D("Playground/assets/textures/Checkerboard.png");
 		m_LogoTexture = Fish::Renderer::CreateTexture2D("Playground/assets/textures/ChernoLogo.png");
+		m_WhiteTexture = Fish::Renderer::CreateTexture2D("Playground/assets/textures/White.png");
 	}
 
 	void OnUpdate(Fish::Timestep ts)override {
@@ -63,9 +62,10 @@ public:
 			{
 				glm::vec3 pos(x * 0.11f, y * 0.11f, 0.0f);
 				Fish::Renderer::Submit({
-					.shader       = m_FlatColorShader,
+					.shader       = m_TextureShader,
 					.vertexBuffer = m_SquareVB,
 					.indexBuffer  = m_SquareIB,
+					.texture      = m_WhiteTexture,//建立纹理库,这里换成索引
 					.transform    = glm::translate(glm::mat4(1.0f), pos) * scale,
 					.color        = color });
 			}
@@ -86,11 +86,12 @@ public:
 			.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(0.6f, -0.5f, 0.0f))
 			                * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)) });
 
-		// 3. 三角形:stride 28,和上面两条都不同 —— 走第三条管线
+		// 3. 三角形:和上面两条同 stride、同 shader,复用同一条管线。
 		Fish::Renderer::Submit({
-			.shader       = m_FlatColorShader,
+			.shader       = m_TextureShader,
 			.vertexBuffer = m_TriangleVB,
 			.indexBuffer  = m_TriangleIB,
+			.texture      = m_WhiteTexture,
 			.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.5f, 0.0f)),
 			.color        = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) });
 
@@ -109,8 +110,9 @@ public:
 	}
 
 private:
-	Fish::Ref<Fish::Shader> m_FlatColorShader;
+	Fish::Ref<Fish::Shader> m_FlatColorShader;   // 零调用者了,留着没删
 	Fish::Ref<Fish::Shader> m_TextureShader;
+	Fish::Ref<Fish::Texture2D> m_WhiteTexture;
 	Fish::Ref<Fish::VertexBuffer> m_SquareVB;
 	Fish::Ref<Fish::IndexBuffer>  m_SquareIB;
 	Fish::Ref<Fish::VertexBuffer> m_TriangleVB;

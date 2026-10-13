@@ -3,14 +3,17 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace Fish {
-	OrthographicCamera::OrthographicCamera(float left, float right, float bottom, float top)
-		: m_ProjectionMatrix(glm::ortho(left, right, bottom, top, -1.0f, 1.0f)), m_ViewMatrix(1.0f)
+	// glm::ortho 产出的是 GL 约定的 NDC(y 向上),Vulkan 的 NDC y 向下。
+	// 所以 y 两个参数反过来传 —— 不反的话整个画面上下镜像:物体位置上下颠倒,
+	// 相机按 W 往 +y 走,画面里的东西却往上跑。
+	OrthographicCamera::OrthographicCamera(float pos_x, float neg_x, float pos_y, float neg_y)
+		: m_ProjectionMatrix(glm::ortho(neg_x, pos_x, pos_y, neg_y, -1.0f, 1.0f)), m_ViewMatrix(1.0f)
 	{
 		m_ViewProjectionMatrix = m_ProjectionMatrix * m_ViewMatrix;
 	}
-	void OrthographicCamera::SetProjection(float left, float right, float bottom, float top)
+	void OrthographicCamera::SetProjection(float pos_x, float neg_x, float pos_y, float neg_y)
 	{
-		m_ProjectionMatrix = glm::ortho(left, right, bottom, top, -1.0f, 1.0f);
+		m_ProjectionMatrix = glm::ortho(neg_x, pos_x, pos_y, neg_y, -1.0f, 1.0f);
 		m_ViewProjectionMatrix = m_ProjectionMatrix * m_ViewMatrix;
 	}
 

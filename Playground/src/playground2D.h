@@ -20,6 +20,7 @@ public:
 
 private:
 	Fish::Ref<Fish::Shader> m_Shader = nullptr;
+	Fish::Ref<Fish::Texture2D> m_WhiteTexture = nullptr;
 	Fish::Ref<Fish::VertexBuffer> m_SquareVB = nullptr;
 	Fish::Ref<Fish::IndexBuffer>  m_SquareIB = nullptr;
 	Fish::OrthographicCameraController m_CameraController;
