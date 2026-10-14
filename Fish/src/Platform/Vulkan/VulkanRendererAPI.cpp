@@ -137,13 +137,15 @@ namespace Fish {
 
 		if (state.shader == nullptr) {
 			state.shader = batch.shader;
-			state.viewProjection = batch.viewProjection;
 		}
 		else {
 			FS_CORE_ASSERT(state.shader == batch.shader, "同一个批里两个 shader");
-			FS_CORE_ASSERT(state.viewProjection == batch.viewProjection,
-				"同一个批里的 viewProjection 不一致:一个批只能配一个相机");
 		}
+
+		// 每次提交都重记。viewProjection 是"这一帧用哪个相机",不是"这个批永远用
+		// 哪个相机" —— 只在第一次赋值会让整个批冻在第一帧的相机上,而 resize 和
+		// 最小化都会重算相机的投影矩阵,之后批里的顶点还是按老矩阵变换。
+		state.viewProjection = batch.viewProjection;
 
 		AppendShapeVertices(state.vertices, batch);
 	}
