@@ -7,8 +7,6 @@ playground2D::playground2D():Layer("Sandbox2D"), m_CameraController(1280.0f / 72
 	m_Shader = Fish::Renderer::CreateShader("Texture",
 		"Fish/src/Platform/Vulkan/shaders/texture.spv");
 
-	// 纯色方块也得走贴图管线,所以顶点补上 uv —— stride 12 → 20。
-	// 20 和 ExampleLayer 那个方块一样,两条共用一条管线。
 	float squareVertices[5 * 4] = {
 		-0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
 		 0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
@@ -21,8 +19,6 @@ playground2D::playground2D():Layer("Sandbox2D"), m_CameraController(1280.0f / 72
 		squareVertices, sizeof(squareVertices), 5 * sizeof(float));
 	m_SquareIB = Fish::Renderer::CreateIndexBuffer(squareIndices, 6);
 
-	// 每个 layer 各拿一张,layer 之间不互相引用。1×1 全白,采样恒为 1,
-	// 颜色全靠 ubo.color。
 	m_WhiteTexture = Fish::Renderer::CreateTexture2D("Playground/assets/textures/White.png");
 }
 
