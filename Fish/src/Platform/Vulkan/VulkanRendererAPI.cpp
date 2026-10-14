@@ -113,12 +113,8 @@ namespace Fish {
 				" 越界,上限是 " + std::to_string(k_MaxTextures));
 		}
 		if (m_BatchTextureUsed[slot]) {
-			// 同一张贴图重复登记同一个槽是幂等的,直接放过。判据比的是 imageView
-			// (纹理对象身份,对齐 Hazel 那个 operator==),不是路径 —— 同一个 png
-			// 建出两个对象仍然算两张。
 			if (m_BatchTextureInfos[slot].imageView == *tex.getView())
 				return;
-			// 换一张来占已经占了的槽不放过:texId 照样指得到这个槽,会静默采到先登记那张。
 			throw std::runtime_error("纹理库槽位 " + std::to_string(slot) + " 已经被另一张贴图占了");
 		}
 		// 库是一次写完的,写完就不再动 —— 再登记进来的贴图不会出现在 set 里,

@@ -32,7 +32,7 @@ namespace Fish {
 
 	// glm 的 aligned 宏一旦打开,vec4 的对齐会把后面所有字段推走,而反射的前缀和
 	// 是按紧凑排布算的 —— 两边错开,而 BuildVertexInput 只检查总和不超 stride,
-	// 错开是查不出来的。这四条 static_assert 是唯一的哨兵。
+	// 错开是查不出来的。这6条 static_assert 是唯一的哨兵。
 	static_assert(sizeof(BatchVertex) == k_BatchVertexStride, "BatchVertex 布局和 batch.slang 对不上");
 	static_assert(offsetof(BatchVertex, position) == 0,  "position 不在 offset 0");
 	static_assert(offsetof(BatchVertex, color) == 12,    "color 不在 offset 12");
