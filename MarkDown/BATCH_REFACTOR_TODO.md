@@ -7,6 +7,10 @@
 > 遗留项见第六节。
 >
 > 逐文件改动见 `BATCH_CHANGES.md`。
+>
+> **2026-10-16 补:这轮建的「纹理库」已经被 `BINDLESS_REFACTOR_TODO.md` 那轮整个换掉了。**
+> 下面凡是讲 set 2 / `albedo[64]` / 应用层指定槽位 /「写一次就不动」的地方,都是**当时的样子**,
+> 不是现状。**尤其第四节第 3 条和第五节坑 1 的结论已经被推翻** —— 见下面那两处的更新注。
 
 ---
 
@@ -134,6 +138,15 @@ VUID-vkCmdDraw-None-08114 ... Set 2, Binding 0, Index 3, variable "albedo"
 所以空槽填第一个登记过的贴图的 `DescriptorImageInfo`。填什么不影响画面 ——
 正常的 `texId` 指不到那儿。\n**结论:那个特性去掉了。** 少一条硬特性就少一批选不出来的设备。
 
+> **2026-10-16 更新:这条的结论已经被推翻。** 当时那个 `BuildLayout` 根本没有 `pNext`
+> (`VulkanDescriptorAllocator.cpp:91-93`),所以 `descriptorBindingPartiallyBound` 这个
+> **binding flag 从来就设不上去** —— "实测挡不住"测的是一个从没生效过的配置。
+> 那轮之后 `BuildLayout` 挂上了 `DescriptorSetLayoutBindingFlagsCreateInfo`,现在表那条
+> binding 上是 `eUpdateAfterBind | ePartiallyBound`,而 filler 那段已经删掉了。
+>
+> **但"所以它挡得住"这个说法本身也只是归因,没做 A/B** —— 删 filler 和加 flag 是同一次
+> 改动。要真定得把 flag 去掉再跑一遍。见 `BINDLESS_REFACTOR_TODO.md` 第六节。
+
 ### 4. 批的 key 不含 viewProjection
 
 一帧里两个 layer 各自 `BeginScene` 会给出两套相机。`SubmitBatch` 里加了断言:
@@ -170,6 +183,10 @@ albedo[NonUniformResourceIndex(vertIn.fragTexId)].Sample(...);    // 索引非�
 
 见第四节第 3 条。方案里原本打算靠 `descriptorBindingPartiallyBound` 让「未写也不访问」
 合法 —— 实测挡不住。
+
+> **2026-10-16 已过时**:见第四节第 3 条那条更新。当时这个 flag 根本没设上,所以
+> "实测挡不住"不成立。现在表里 4084 个空洞是空的,跑了 20 秒 + resize + 退出,一条
+> `VUID-vkCmdDraw-None-08114` 都没有。
 
 ### 2. 两个 layer 各建一份 shader 会拿到两个 `vk::ShaderModule`
 
@@ -212,6 +229,9 @@ OpCapability StorageInputOutput16
 
 ## 六、遗留项
 
+> **2026-10-16:下面「结构性欠账」里有两条已经被 bindless 那轮作废,在条目里标了。**
+> 其余仍然有效。
+
 ### 没验证的
 
 | 项 | 说明 |
@@ -228,9 +248,13 @@ OpCapability StorageInputOutput16
   三角形」,改后是「三角形批 → 四边形批(400 方块 + 两张贴图)」。这次没看出差别
   是因为三角形和方块区域不重叠。
 - **一个批一个相机。** 见第四节第 4 条,现在是碰巧成立的。
-- **纹理库写一次就不动了。** 之后再 `RegisterBatchTexture` 会抛(见代码里的三处 throw)。
-- **`k_MaxTextures = 64`** 受 `VkPhysicalDeviceLimits::maxDescriptorSetSampledImages`
-  约束(规范保证的下限是 96)。桌面卡都在百万级,但这是 64 这个数的由来。
+- ~~**纹理库写一次就不动了。** 之后再 `RegisterBatchTexture` 会抛(见代码里的三处 throw)。~~
+  **2026-10-16 作废**:那三处 throw 全删了,现在表建出来之后每加一张贴图立刻写那一格。
+- ~~**`k_MaxTextures = 64`** 受 `VkPhysicalDeviceLimits::maxDescriptorSetSampledImages`
+  约束(规范保证的下限是 96)。桌面卡都在百万级,但这是 64 这个数的由来。~~
+  **2026-10-16 作废**:整个常量删了。格数改成运行时取
+  `min(maxDescriptorSetUpdateAfterBindSampledImages, 4096)` —— 注意是 **UpdateAfterBind**
+  那套 limit,和上面写的 `maxDescriptorSetSampledImages` 是两个不同的值。
 - **`MarkDown/RENDERER_ARCHITECTURE.md` 现在只描述旧路径了** —— 批这条路没写进去。
 
 ### 还想做的

@@ -26,8 +26,7 @@ namespace Fish {
 		static Ref<VertexBuffer> CreateVertexBuffer(const void* data, size_t size, uint32_t stride);
 		static Ref<IndexBuffer>  CreateIndexBuffer(const uint32_t* indices, uint32_t count);
 
-		static Ref<Texture2D>    CreateTexture2D(const std::string& path,
-			uint32_t batchSlot = k_NoBatchTextureSlot);
+		static Ref<Texture2D>    CreateTexture2D(const std::string& path);
 
 		static void SetClearColor(const glm::vec4& color);
 

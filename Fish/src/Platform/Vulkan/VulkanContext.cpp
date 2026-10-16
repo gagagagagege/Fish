@@ -110,14 +110,22 @@ namespace Fish {
             vk::PhysicalDeviceVulkan13Features,
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
             vk::PhysicalDeviceDescriptorIndexingFeatures>();
+        const vk::PhysicalDeviceDescriptorIndexingFeatures& indexing =
+            features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
-            // 批处理那张贴图数组:索引来自顶点属性,所以是非一致的。
-            // descriptorBindingPartiallyBound 不在列表里 —— 库把每一格都写了,
-            // 用不上它,少一条硬特性就少一批选不出来的设备。
-            features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().shaderSampledImageArrayNonUniformIndexing;
+            // 纹理表那张 albedo:索引来自顶点属性/UBO,所以是非一致的
+            indexing.shaderSampledImageArrayNonUniformIndexing &&
+            // 表是运行时数组(albedo[]),格数不写在 shader 里
+            indexing.runtimeDescriptorArray &&
+            // 边画边往里填:set 已经录进在飞命令缓冲之后还要能改它。
+            // ePartiallyBound 放行"表里有没写过的格",eUpdateUnusedWhilePending
+            // 是这一组的标准搭配(单看它是 updateAfterBind 的弱化替代,不是硬要求)。
+            indexing.descriptorBindingSampledImageUpdateAfterBind &&
+            indexing.descriptorBindingPartiallyBound &&
+            indexing.descriptorBindingUpdateUnusedWhilePending;
 
         // Return true if the physicalDevice meets all the criteria
         return supportsVulkan1_3 && supportsGraphicsAndPresent && supportsAllRequiredExtensions && supportsRequiredFeatures;
@@ -152,7 +160,12 @@ namespace Fish {
             {.extendedDynamicState = true},                              // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
             // 必须和上面 isDeviceSuitable 里那串检查一一对应 —— 少一条就是查了
             // 一个链子里没开的字段,getFeatures2 那片内存是别的东西填的。
-            {.shaderSampledImageArrayNonUniformIndexing = true}          // vk::PhysicalDeviceDescriptorIndexingFeatures
+            // 顺序必须是结构体里的声明顺序 —— 乱序 MSVC 报 C5337(非标准扩展)。
+            {.shaderSampledImageArrayNonUniformIndexing = true,          // vk::PhysicalDeviceDescriptorIndexingFeatures
+             .descriptorBindingSampledImageUpdateAfterBind = true,
+             .descriptorBindingUpdateUnusedWhilePending = true,
+             .descriptorBindingPartiallyBound = true,
+             .runtimeDescriptorArray = true}
         };
 
         // create a logical device

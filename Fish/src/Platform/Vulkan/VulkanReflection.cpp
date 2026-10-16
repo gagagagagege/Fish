@@ -18,6 +18,15 @@ namespace Fish {
 			return static_cast<T>(value);
 		}
 
+		// 运行时数组的维度 SPIRV-Reflect 填的是哨兵值 SPV_REFLECT_ARRAY_DIM_RUNTIME
+		// (== 0),它会乘进 count。所以不能拿 count == 0 判"这是运行时数组" ——
+		// 那是在读一个被哨兵污染过的结果,直接看维度本身。
+		bool IsRuntimeArray(const SpvReflectDescriptorBinding& binding)
+		{
+			return binding.array.dims_count > 0 &&
+				binding.array.dims[binding.array.dims_count - 1] == SPV_REFLECT_ARRAY_DIM_RUNTIME;
+		}
+
 		void Check(SpvReflectResult result, const char* what)
 		{
 			if (result != SPV_REFLECT_RESULT_SUCCESS)
@@ -104,12 +113,17 @@ namespace Fish {
 						[&](const ReflectedDescriptorBindings::Binding& b) {
 							return b.set == set.set && b.binding == binding.binding && b.type == type;
 						});
+					const bool runtimeArray = IsRuntimeArray(binding);
 					if (existing != result.bindings.end()) {
 						existing->stages |= stages;
 						existing->count = std::max(existing->count, binding.count);
+						// 两个 stage 有一个写成运行时数组,整个绑定就是 ——
+						// 另一个 stage 报的 count 是它那一侧的数,不能压过这个结论。
+						existing->runtimeArray = existing->runtimeArray || runtimeArray;
 					}
 					else {
-						result.bindings.push_back({ set.set, binding.binding, type, stages, binding.count });
+						result.bindings.push_back({ set.set, binding.binding, type, stages,
+							binding.count, runtimeArray });
 					}
 				}
 			}

@@ -132,7 +132,7 @@ namespace Fish {
 			vulkan->m_TransientPool, indices, count);
 	}
 
-	Ref<Texture2D> Renderer::CreateTexture2D(const std::string& path, uint32_t batchSlot)
+	Ref<Texture2D> Renderer::CreateTexture2D(const std::string& path)
 	{
 		auto* vulkan = dynamic_cast<VulkanRendererAPI*>(s_RendererAPI);
 		FS_CORE_ASSERT(vulkan, "CreateTexture2D 需要 Vulkan 后端");
@@ -142,9 +142,8 @@ namespace Fish {
 		auto texture = std::make_shared<VulkanTexture2D>(vulkan->m_DeviceContext.get(),
 			vulkan->m_TransientPool, path);
 
-		// 后端的纹理库按槽位记 view/sampler,画批之前一次写进 set 2。
-		if (batchSlot != k_NoBatchTextureSlot)
-			vulkan->RegisterBatchTexture(batchSlot, texture->getTexture());
+		// 槽位由后端发号,应用层不管 —— 也就没有"槽位撞了"和"登记得太晚"两种错。
+		texture->SetBindlessIndex(vulkan->RegisterTexture(texture->getTexture()));
 
 		return texture;
 	}

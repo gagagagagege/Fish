@@ -46,11 +46,15 @@ namespace Fish {
 			}
 			// 数组长度必须比。不比的话后声明的那个被静默丢掉,layout 里的数组
 			// 偏短,越界读到的是隔壁 set 的内容 —— 建管线、建池子都不报错。
-			else if (existing->count != incoming.count) {
+			// 运行时数组两边反射回来的都是 0(哨兵值乘进去了),所以不能只看数字:
+			// 0 == 0 会把"一边写 [] 一边写 [64]"放过,而要拿后者去建 layout。
+			else if (existing->runtimeArray != incoming.runtimeArray ||
+				(!incoming.runtimeArray && existing->count != incoming.count)) {
 				throw std::runtime_error("DescriptorAllocator: set " + std::to_string(incoming.set) +
-					" binding " + std::to_string(incoming.binding) + " 被声明成了 " +
-					std::to_string(existing->count) + " 和 " + std::to_string(incoming.count) +
-					" 两种数组长度");
+					" binding " + std::to_string(incoming.binding) + " 被声明成了两种数组:一边是 " +
+					(existing->runtimeArray ? "[]" : "[" + std::to_string(existing->count) + "]") +
+					",一边是 " +
+					(incoming.runtimeArray ? "[]" : "[" + std::to_string(incoming.count) + "]"));
 			}
 			else if (existing->stages != incoming.stages) {
 				existing->stages |= incoming.stages;
@@ -76,19 +80,42 @@ namespace Fish {
 		layouts.reserve(setCount);
 
 		for (uint32_t set = 0; set < setCount; ++set) {
+			const bool updateAfterBind = IsUpdateAfterBindSet(set);
+
 			std::vector<vk::DescriptorSetLayoutBinding> layoutBindings;
+			std::vector<vk::DescriptorBindingFlags>      bindingFlags;
 			for (const ReflectedDescriptorBindings::Binding& binding : m_bindings) {
 				if (binding.set != set)
 					continue;
 				layoutBindings.push_back({
 					.binding = binding.binding,
 					.descriptorType = AsDynamic(binding.type),
-					.descriptorCount = binding.count,
+					.descriptorCount = DescriptorCount(binding),
 					.stageFlags = binding.stages
 					});
+
+				// 表那套:格数由 layout 定,而且是边走边填,所以两个 flag 都要。
+				// ePartiallyBound 是给"还没写过的格"留的 —— 贴图是随时创建的,
+				// 表里天然有空洞,而验证层证明不了运行期的 texId 指到哪儿。
+				vk::DescriptorBindingFlags flags{};
+				if (updateAfterBind) {
+					flags |= vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+					flags |= vk::DescriptorBindingFlagBits::ePartiallyBound;
+				}
+				bindingFlags.push_back(flags);
 			}
 
+			vk::DescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{
+				.bindingCount = static_cast<uint32_t>(bindingFlags.size()),
+				.pBindingFlags = bindingFlags.data() };
+
 			vk::DescriptorSetLayoutCreateInfo layoutInfo{
+				.pNext = &flagsInfo,
+				// VUID-VkDescriptorSetLayoutCreateInfo-flags-03000:binding 上带了
+				// eUpdateAfterBind,layout 的 flags 就必须带这个。
+				.flags = updateAfterBind
+					? vk::DescriptorSetLayoutCreateFlags(vk::DescriptorSetLayoutCreateFlagBits::eUpdateAfterBindPool)
+					: vk::DescriptorSetLayoutCreateFlags{},
 				.bindingCount = static_cast<uint32_t>(layoutBindings.size()),
 				.pBindings = layoutBindings.data() };
 			layouts.emplace_back(m_context->device, layoutInfo);
@@ -109,12 +136,50 @@ namespace Fish {
 		return handles;
 	}
 
-	void DescriptorAllocator::BuildPool(uint32_t maxSets)
+	// 运行时数组(albedo[])反射回来的 count 是 0 —— 反射把维度那个哨兵值 0
+	// 乘进去了。格数只能由 layout 这侧定,而它同时也是槽位分配器的上界。
+	uint32_t DescriptorAllocator::DescriptorCount(const ReflectedDescriptorBindings::Binding& binding)
+	{
+		return binding.runtimeArray ? textureTableSize() : binding.count;
+	}
+
+	uint32_t DescriptorAllocator::ComputeTextureTableSize()
+	{
+		const vk::PhysicalDeviceDescriptorIndexingProperties indexing =
+			m_context->physicalDevice
+				.getProperties2<vk::PhysicalDeviceProperties2, vk::PhysicalDeviceDescriptorIndexingProperties>()
+				.get<vk::PhysicalDeviceDescriptorIndexingProperties>();
+
+		// 表那条 binding 带 updateAfterBind,所以算的是 UAB 的那套 limit,
+		// 不是 maxDescriptorSetSampledImages —— 两个值可以不一样。
+		return std::min(indexing.maxDescriptorSetUpdateAfterBindSampledImages, k_MaxBindlessTextures);
+	}
+
+	uint32_t DescriptorAllocator::textureTableSize()
+	{
+		if (m_textureTableSize != 0)
+			return m_textureTableSize;
+
+		if (m_context == nullptr)
+			throw std::runtime_error("DescriptorAllocator: 还没有 shader 登记过绑定,"
+				"查不了设备的描述符上限 —— 贴图必须在第一个 shader 之后创建");
+
+		m_textureTableSize = ComputeTextureTableSize();
+		if (m_textureTableSize == 0)
+			throw std::runtime_error("DescriptorAllocator: 设备报的 updateAfterBind 采样图上限是 0");
+
+		return m_textureTableSize;
+	}
+
+	void DescriptorAllocator::BuildPool(uint32_t set, uint32_t maxSets)
 	{
 		std::vector<vk::DescriptorPoolSize> poolSizes;
 		for (const ReflectedDescriptorBindings::Binding& binding : m_bindings) {
+			if (binding.set != set)
+				continue;
+
 			const vk::DescriptorType type = AsDynamic(binding.type);
-			const uint32_t count = binding.count * maxSets;
+			const uint32_t count = DescriptorCount(binding) * maxSets;
 
 			auto existing = std::ranges::find(poolSizes, type, &vk::DescriptorPoolSize::type);
 			if (existing != poolSizes.end())
@@ -123,12 +188,19 @@ namespace Fish {
 				poolSizes.push_back({ .type = type, .descriptorCount = count });
 		}
 
+		vk::DescriptorPoolCreateFlags flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
+		// VUID-VkDescriptorSetAllocateInfo-pSetLayouts-03044:带 eUpdateAfterBindPool
+		// 的 layout 只能从带这个 flag 的池里分。反向没约束,不带的 layout 从哪个池
+		// 里分都行 —— 所以只给表那个池加。
+		if (IsUpdateAfterBindSet(set))
+			flags |= vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind;
+
 		vk::DescriptorPoolCreateInfo poolInfo{
-			.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+			.flags = flags,
 			.maxSets = maxSets,
 			.poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
 			.pPoolSizes = poolSizes.data() };
-		m_pool = vk::raii::DescriptorPool(m_context->device, poolInfo);
+		m_pools[PoolIndex(set)] = vk::raii::DescriptorPool(m_context->device, poolInfo);
 	}
 
 	vk::raii::DescriptorSet DescriptorAllocator::allocateSet(uint32_t set)
@@ -139,14 +211,17 @@ namespace Fish {
 			throw std::runtime_error("DescriptorAllocator: set " + std::to_string(set) +
 				" 没有任何 shader 声明过");
 
-		if (m_pool == nullptr)
-			BuildPool(k_DescriptorSetBudget);
+		// 池按 set 分家:表那个池只装一个 set,不能被 k_DescriptorSetBudget 放大。
+		const uint32_t poolIndex = PoolIndex(set);
+		if (m_pools[poolIndex] == nullptr) {
+			BuildPool(set, IsUpdateAfterBindSet(set) ? k_TextureTableSetCount : k_DescriptorSetBudget);
+		}
 
 		// 池一建出来就有 set 引用着 layout 了,从此不能再重建
 		m_layoutFrozen = true;
 
 		std::vector<vk::DescriptorSetLayout> layouts{ *m_layouts[set] };
-		vk::DescriptorSetAllocateInfo        allocInfo{ .descriptorPool = *m_pool,
+		vk::DescriptorSetAllocateInfo        allocInfo{ .descriptorPool = *m_pools[poolIndex],
 													   .descriptorSetCount = 1,
 													   .pSetLayouts = layouts.data() };
 

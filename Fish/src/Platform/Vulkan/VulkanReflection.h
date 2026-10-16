@@ -34,6 +34,9 @@ namespace Fish {
 			vk::DescriptorType   type;
 			vk::ShaderStageFlags stages;
 			uint32_t             count;      // 数组绑定才是 >1
+			// shader 写的是 [] 不是 [N]。反射把哨兵值 0 乘进 count,所以运行时
+			// 数组在这里读到的是 0 —— 格数由 layout 那侧定,不能读这个数。
+			bool                 runtimeArray;
 
 			// 用来比"后一个 shader 声明的绑定和前一个是否一致"
 			bool operator==(const Binding&) const = default;

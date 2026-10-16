@@ -24,10 +24,15 @@ namespace Fish {
 		uint32_t GetWidth() const override;
 		uint32_t GetHeight() const override;
 
+		// 槽位不是构造参数 —— 发号要拿贴图本身的 view/sampler,得等它建完。
+		uint32_t GetBindlessIndex() const override { return m_bindlessIndex; }
+		void     SetBindlessIndex(uint32_t slot) { m_bindlessIndex = slot; }
+
 		const texture& getTexture() const { return m_texture; }
 		texture&       getTexture() { return m_texture; }
 
 	private:
-		texture m_texture;
+		texture  m_texture;
+		uint32_t m_bindlessIndex = 0;
 	};
 }

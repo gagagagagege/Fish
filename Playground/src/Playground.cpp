@@ -5,6 +5,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -13,10 +14,7 @@
 #include"Core/EntryPoint.h"
 
 namespace {
-	// 批纹理库的槽
-	constexpr uint32_t k_SlotCheckerboard = 0;
-	constexpr uint32_t k_SlotLogo         = 1;
-	constexpr uint32_t k_SlotWhite        = 2;
+	// 批纹理库几张图。槽位不在这儿定 —— 后端发号,构造时读回来,见 m_BatchTexIds。
 	constexpr uint32_t k_BatchTextureCount = 3;
 
 	// 上下键各按一次改这么多。边沿触发,按住不放不会连着涨。
@@ -56,9 +54,14 @@ public:
 			squareVertices, sizeof(squareVertices), 5 * sizeof(float));
 		m_SquareIB = Fish::Renderer::CreateIndexBuffer(squareIndices, 6);
 
-		m_Texture     = Fish::Renderer::CreateTexture2D("Playground/assets/textures/Checkerboard.png", k_SlotCheckerboard);
-		m_LogoTexture = Fish::Renderer::CreateTexture2D("Playground/assets/textures/ChernoLogo.png",  k_SlotLogo);
-		m_WhiteTexture = Fish::Renderer::CreateTexture2D("Playground/assets/textures/White.png",      k_SlotWhite);
+		m_Texture      = Fish::Renderer::CreateTexture2D("Playground/assets/textures/Checkerboard.png");
+		m_LogoTexture  = Fish::Renderer::CreateTexture2D("Playground/assets/textures/ChernoLogo.png");
+		m_WhiteTexture = Fish::Renderer::CreateTexture2D("Playground/assets/textures/White.png");
+
+		// 槽位是后端发的,不假设 0/1/2 —— 建完读回来存着,提交时按它取。
+		m_BatchTexIds = { m_Texture->GetBindlessIndex(),
+		                  m_LogoTexture->GetBindlessIndex(),
+		                  m_WhiteTexture->GetBindlessIndex() };
 	}
 
 	void OnUpdate(Fish::Timestep ts)override {
@@ -87,7 +90,7 @@ public:
 				.transform    = glm::translate(glm::mat4(1.0f), pos) * scale,
 				.color        = color,
 				// 三张轮着来
-				.texId        = i % k_BatchTextureCount,
+				.texId        = m_BatchTexIds[i % k_BatchTextureCount],
 				.tilingFactor = 1.0f });
 		}
 
@@ -170,6 +173,7 @@ private:
 	Fish::Ref<Fish::Shader> m_TextureShader;
 	Fish::Ref<Fish::Shader> m_BatchShader;
 	Fish::Ref<Fish::Texture2D> m_WhiteTexture;
+	std::array<uint32_t, k_BatchTextureCount> m_BatchTexIds{};
 	Fish::Ref<Fish::VertexBuffer> m_SquareVB;
 	Fish::Ref<Fish::IndexBuffer>  m_SquareIB;
 	Fish::Ref<Fish::VertexBuffer> m_TriangleVB;

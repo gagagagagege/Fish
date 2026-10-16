@@ -16,8 +16,6 @@ namespace Fish {
 
 	inline constexpr uint32_t k_BatchShapeCount = 2;
 
-	inline constexpr uint32_t k_NoBatchTextureSlot = ~0u;
-
 	// 字段顺序不能改:offset in shader
 	struct BatchVertex
 	{

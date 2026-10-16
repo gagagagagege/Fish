@@ -9,6 +9,9 @@
 > **状态：全部完成。** 构建 0 错误 0 警告；稳态跑 20 秒 0 条验证层输出；
 > `WM_CLOSE` 退出与 resize 两条边界路径各自独立验过；**画面已截屏确认**。
 > 死代码也已清理（见第六节）。
+>
+> **2026-10-16 补:bindless 那轮(`BINDLESS_REFACTOR_TODO.md`)在第九节 B3 那条上又发现了
+> 一个同类实例** —— `descriptorCount` 这条链断在反射上。见 B3 那条下面的更新注。
 
 ---
 
@@ -798,7 +801,15 @@ cmake --build build --config Debug
 cd Fish/src/Platform/Vulkan/shaders
 D:\Vulkan_SDK\Bin\slangc.exe flat_color.slang -target spirv -profile spirv_1_4 -emit-spirv-directly -o flat_color.spv
 D:\Vulkan_SDK\Bin\slangc.exe texture.slang     -target spirv -profile spirv_1_4 -emit-spirv-directly -o texture.spv
+D:\Vulkan_SDK\Bin\slangc.exe batch.slang       -target spirv -profile spirv_1_4 -emit-spirv-directly -o batch.spv
 ```
+> **2026-10-16：`batch.slang` 那一行是 2026-10-12 补上去的**，原来这份只列了两条 ——
+> `compile.bat` 里当时也是两条，结果是"构建成功、`.spv` 陈旧"（`BATCH_REFACTOR_TODO.md`
+> 第五节坑 5）。**这个清单和 `compile.bat` 必须一起改。**
+>
+> 顺带：`D:\Vulkan_SDK\Bin\` 下有 `spirv-reflect.exe` 和 `spirv-dis.exe`，
+> 改完 shader 想直接看反汇编/反射结果不用走"编译 + 运行"。
+> 见 `BINDLESS_REFACTOR_TODO.md` 第五节坑 2。
 
 验证脚本（PowerShell，纯 ASCII —— PS 5.1 按 ANSI 读 `.ps1`，写中文会被拆坏）：
 - `C:\Users\Ivan\AppData\Local\Temp\fish_exit_test.ps1` —— `WM_CLOSE` 退出
@@ -864,6 +875,21 @@ D:\Vulkan_SDK\Bin\slangc.exe texture.slang     -target spirv -profile spirv_1_4 
 | **B2** | 改窗口标题 | `Fish/src/Core/Window.h:13` 还是 Hazel 模板留下的 `"Hazel Engine"` |
 | **B3** | 把写死的 `sizeof(PushConstants)` / `sizeof(ObjectUbo)` 换成反射值 | `VulkanRendererAPI.cpp` 的 push constant range 用 `push_constant_blocks[0].size`；`VulkanFrameData.cpp` 的描述符 `range` 用 `descriptor_binding.block.size`。**注意两者语义不同**：push constant range 只需覆盖，描述符 range 必须是一个元素的大小 |
 | **B4** | 把 shader 编译接进 CMake | 现在是手动跑 `compile.bat`（`slangc` 路径还写死 `D:\Vulkan_SDK\Bin`，没有任何 CMake 规则）。加 `add_custom_command` 可以省掉"改完 shader 忘了重编"这个坑 |
+
+> **B3 · 2026-10-16 更新:同一条链上还有第三处 —— `descriptorCount`。**
+>
+> `VulkanDescriptorAllocator.cpp:93` 现在对**运行时数组**的 binding 走 `textureTableSize()`
+> 而不是 `binding.count`,因为 SPIRV-Reflect 把运行时维度的哨兵值 0 乘进了 `count`
+> (实测 `spirv-reflect.exe texture.spv` → `count : 0` / `array : [0]`)。
+> 反射给不了格数,格数只能由 layout 那侧定。
+>
+> 所以 B3 描述的那个模式这轮又多一个实例。**三处长得像,但判法各不相同,不能一刀切:**
+>
+> | 位置 | 反射里有 | 为什么不能直接用 |
+> |---|---|---|
+> | push constant range | `push_constant_blocks[0].size` | 语义不同 —— range 只需**覆盖** |
+> | descriptor range | `descriptor_binding.block.size` | 语义不同 —— range 必须是**一个元素**的大小 |
+> | `descriptorCount`(运行时数组) | `array.dims` / `count` | `count` 被哨兵污染成 0;**格数 shader 侧压根不存在** |
 
 ### C. 已知欠账
 

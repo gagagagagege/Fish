@@ -4,6 +4,10 @@
 > 过程记录（做了什么、为什么这么做、怎么验的、撞了哪些 bug）在 `PIPELINE_REFACTOR_TODO.md`。
 >
 > 描述的是 **2026-09-23 这次改动之后**的状态。改动前的状态在第一节的对照表里。
+>
+> **2026-10-16 补:bindless 那轮(`BINDLESS_REFACTOR_TODO.md`)改动了本文两处** ——
+> 第二节对照表的「描述符集」那一行,和第四节底下的 GPU 侧契约表。**两处都就地标了更新注。**
+> 其余各节(分层、数据流、初始化顺序、所有权、销毁顺序)**没有变**。
 
 ---
 
@@ -24,7 +28,7 @@
 | **谁持有资源** | 后端持有（`m_MainTexture`、`m_Pipeline` …） | **应用层持有**（layer 里的 `Ref<Shader>` / `Ref<VertexArray>` / `Ref<Texture2D>`），后端只在绘制时按需要降级访问 |
 | **管线** | 单条，`Init` 里建；shader 路径 / 入口名 / 顶点布局 / 全部固定功能状态写死在 `VulkanPipeline.cpp` | `PipelineCache`，按 `PipelineDesc` 缓存；顶点布局从 shader 反射 |
 | **描述符布局** | 写死 `binding 0 = UBO`、`binding 1 = sampler`，在构造函数里拼 | 由所有 shader 声明的绑定取**并集**推导 |
-| **描述符集** | 每帧槽一个，构造时就把唯一那张贴图绑死 | **两个 set**：set 0 = UBO（dynamic offset），set 1 = 贴图（按贴图缓存） |
+| **描述符集** | 每帧槽一个，构造时就把唯一那张贴图绑死 | **两个 set**：set 0 = UBO（dynamic offset），set 1 = 贴图 ~~（按贴图缓存）~~ —— **2026-10-16 改成一张运行时数组,两条路共用** |
 | **每物体数据** | 没有 —— 一帧一个 MVP | UBO 环形缓冲（只放 `model`，dynamic offset 索引）+ 推送常量（`viewProj` + `color`） |
 | **顶点布局的真相源** | `VulkanBuffer.h` 里的 `struct Vertex` + 两个静态函数 | **shader 自己**（SPIR-V 反射）；`stride` 由调用方给 |
 | **`Submit`** | 硬转 `OpenGLShader` 上传 uniform，然后 `DrawIndexed` | 只把 `DrawItem` 塞进队列，**不碰 GPU** |
@@ -152,12 +156,19 @@ for each item:
 
 ### GPU 侧：shader 和引擎之间的契约
 
+> **2026-10-16:下面这张表从写下那天起就没再同步过**（它写推送常量是 80 字节带 `color`，
+> 而实际早就只有 `viewProj` 64 字节了）。**下面是现在的样子。**
+
 | 位置 | 内容 | 谁写 |
 |---|---|---|
-| 推送常量 offset 0，80 字节，vertex+fragment | `{mat4 viewProj; vec4 color}` | 每物体 push 一次 |
-| 描述符 set 0 / binding 0，`eUniformBufferDynamic`，vertex | `{mat4 model}`，64 字节 | 环形缓冲，dynamic offset 索引 |
-| 描述符 set 1 / binding 0，`eCombinedImageSampler`，fragment | 贴图 | `TextureDescriptorCache` |
+| 推送常量 offset 0，**64 字节**，vertex+fragment | `{mat4 viewProj}` | per-item 每物体一次；批每批一次 |
+| 描述符 set 0 / binding 0，`eUniformBufferDynamic`，vertex+fragment | `{mat4 model; vec4 color; uint texId}`，padded 96 字节 | 环形缓冲，dynamic offset 索引 |
+| 描述符 set 1 / binding 0，`eCombinedImageSampler`，fragment | **运行时数组 `Sampler2D albedo[]`**，格数由 layout 定 | 建表时一次写完已发号的槽；之后每加一张写一格 |
 | 顶点属性 location 0…N | 由 shader 声明的 `Location` 决定 | 调用方给 `stride`，其余从反射来 |
+
+> **一条没算过的**：`ObjectUbo.model` 和 `PushConstants.viewProj` 在 SPIR-V 里都带
+> `RowMajor` + `MatrixStride 16`，而 C++ 侧传的是 GLM 的**列主序** `mat4`。按理解这俩
+> 应该差一个转置，但位置一直是渲染对的。**为什么对得上没推导过。**
 
 这些数字的**真相源是 `.slang` 文件**（`Fish/src/Platform/Vulkan/shaders/`）。
 引擎侧的对应常量在 `VulkanDescriptorAllocator.h`（`k_ObjectUboSet` / `k_ObjectUboBinding` /
@@ -320,6 +331,6 @@ Fish/vendor/SPIRV-Reflect/         ★新  spirv_reflect.{c,h}（Apache 2.0）
 | **2** | **没有深度测试**：管线 `pDepthStencilState = nullptr` | 遮挡完全由绘制顺序决定。多 pass 或 3D 时是硬阻塞 |
 | **3** | **`PipelineCache::Invalidate` 没有调用者**：`SwapChain::recreate()` 不通知任何人 | 交换链 format 变了旧管线就不兼容。现在不出错是**实测碰巧**（本机 resize 之间 format 没变过），不是规范保证 |
 | **4** | **顶点输入只支持单 binding** | 一个顶点跨两个 buffer（位置和实例数据分开）、实例化，都要先改 `BuildVertexInput` |
-| **5** | **描述符设施只支持一套 layout** | 多描述符集（比如 set 0 每帧、set 1 每物体、set 2 材质）要改 `DescriptorAllocator` |
+| **5** | ~~**描述符设施只支持一套 layout**~~ —— 多描述符集（set 0 每帧、set 1 每物体、set 2 材质）要改 `DescriptorAllocator` | **2026-10-16 作废**：全体的 layout 本来就是按 set 号各建一套（`BuildLayout` 的 `setCount = m_bindings.back().set + 1`）。现在实际就是两套（set 0 = UBO、set 1 = 纹理表），加第三套只要 shader 里声明出来。**`DescriptorAllocator` 不用改** |
 | **6** | **shader 编译没有构建集成** | `compile.bat` 手动跑，`slangc` 路径写死。改完 shader 忘了重编就拿到旧 `.spv` |
 | **7** | **创建路径的 `dynamic_cast` 失败时只返回 `nullptr`** | `Renderer::Create*` 拿不到 Vulkan 后端时 `FS_CORE_ASSERT` + `return nullptr`。而 `FS_CORE_ASSERT` 的开关链条是 `FS_DEBUG` → `macro.h:11-13` 派生 `FS_ENABLE_ASSERTS` → 断言体。**`FS_DEBUG` 只在 Debug 配置定义**（`CMakeLists.txt`），所以 Release 下断言整个是空的，只剩一个静默的 `nullptr` |

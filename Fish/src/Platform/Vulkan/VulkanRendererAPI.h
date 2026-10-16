@@ -14,7 +14,6 @@
 #include "VulkanFrameData.h"
 #include "VulkanPipelineCache.h"
 #include "VulkanTexture.h"
-#include "VulkanTextureDescriptorCache.h"
 
 #include <array>
 #include <memory>
@@ -35,7 +34,8 @@ namespace Fish {
 		virtual void DrawFrame(const std::vector<DrawItem>& items) override;
 		virtual void SubmitBatch(const DrawBatch& batch) override;
 
-		void RegisterBatchTexture(uint32_t slot, texture& tex);
+		// 往纹理表里加一张贴图,返回它的槽位。槽位由这里发号,应用层不管。
+		uint32_t RegisterTexture(texture& tex);
 
 	public:
 		vk::raii::Context                m_Context;
@@ -48,7 +48,6 @@ namespace Fish {
 		SwapChain           m_SwapChain;
 		DescriptorAllocator m_DescriptorAllocator;
 		std::optional<PipelineCache>          m_PipelineCache;
-		std::optional<TextureDescriptorCache> m_TextureSets;
 		CommandPool         m_CommandPool;
 		CommandPool         m_TransientPool;
 		Frames              m_Frames;
@@ -73,14 +72,16 @@ namespace Fish {
 		void EnsureRenderState();
 
 		void EnsureBatchBuffer(BatchBuffer& target, uint32_t needed, uint32_t initial);
-		void EnsureBatchTextureLibrary();
+		void EnsureTextureTable();
 		void RecordBatches(vk::raii::CommandBuffer& commandBuffer);
 
 		std::array<BatchState, k_BatchShapeCount> m_Batches;
 
-		std::array<vk::DescriptorImageInfo, k_MaxTextures> m_BatchTextureInfos{};
-		std::array<bool, k_MaxTextures>                    m_BatchTextureUsed{};
-		vk::raii::DescriptorSet                            m_BatchTextureSet = nullptr;
+		// 纹理表。set 建出来之前只攒着,建出来之后每加一张立刻写那一格 ——
+		// updateAfterBind 让"表已经录进在飞命令缓冲之后再写它"合法。
+		vk::raii::DescriptorSet              m_TextureTableSet = nullptr;
+		std::vector<vk::DescriptorImageInfo> m_TextureInfos;   // 下标就是槽位
+		uint32_t                             m_NextTextureSlot = 0;
 
 		GLFWwindow* m_Window = nullptr;
 

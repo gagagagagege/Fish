@@ -106,29 +106,34 @@ namespace Fish {
 		}
 	}
 
-	void VulkanRendererAPI::RegisterBatchTexture(uint32_t slot, texture& tex)
+	uint32_t VulkanRendererAPI::RegisterTexture(texture& tex)
 	{
-		if (slot >= k_MaxTextures) {
-			throw std::runtime_error("纹理库槽位 " + std::to_string(slot) +
-				" 越界,上限是 " + std::to_string(k_MaxTextures));
-		}
-		if (m_BatchTextureUsed[slot]) {
-			if (m_BatchTextureInfos[slot].imageView == *tex.getView())
-				return;
-			throw std::runtime_error("纹理库槽位 " + std::to_string(slot) + " 已经被另一张贴图占了");
-		}
-		// 库是一次写完的,写完就不再动 —— 再登记进来的贴图不会出现在 set 里,
-		// 而顶点里的 texId 照样指得到那个槽位,读到的是空描述符。
-		if (m_BatchTextureSet != nullptr) {
-			throw std::runtime_error("纹理库已经定下来了,槽位 " + std::to_string(slot) +
-				" 登记得太晚 —— 所有贴图必须在第一次画批之前创建");
+		// 先问表多大 —— 表的格数就是 layout 的 descriptorCount,所以没登记过
+		// shader 时这里会抛,不会发出去一个指不到任何东西的槽位。
+		const uint32_t capacity = m_DescriptorAllocator.textureTableSize();
+		if (m_NextTextureSlot >= capacity) {
+			throw std::runtime_error("纹理表满了:已经发了 " + std::to_string(m_NextTextureSlot) +
+				" 个槽位,上限是 " + std::to_string(capacity));
 		}
 
-		m_BatchTextureInfos[slot] = vk::DescriptorImageInfo{
+		const uint32_t slot = m_NextTextureSlot++;
+		const vk::DescriptorImageInfo info{
 			.sampler     = tex.getSampler(),
 			.imageView   = tex.getView(),
 			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
-		m_BatchTextureUsed[slot] = true;
+
+		if (m_TextureInfos.size() < m_NextTextureSlot)
+			m_TextureInfos.resize(m_NextTextureSlot);
+		m_TextureInfos[slot] = info;
+
+		// 表已经建出来了,那就不用等 —— 只写这一格,别的格不碰。
+		// 这一步合法靠的是 set 上那两个 flag(见 DescriptorAllocator::BuildLayout)。
+		if (m_TextureTableSet != nullptr) {
+			m_DescriptorAllocator.writeCombinedImageSamplers(m_TextureTableSet,
+				k_TextureBinding, slot, { info });
+		}
+
+		return slot;
 	}
 
 	void VulkanRendererAPI::SubmitBatch(const DrawBatch& batch)
@@ -170,37 +175,18 @@ namespace Fish {
 		target.capacity = capacity;
 	}
 
-	void VulkanRendererAPI::EnsureBatchTextureLibrary()
+	// 表是懒建的:格数要在 layout 出来之后才知道(那是第一个 shader 的事)。
+	// 建的那一刻把之前攒下的槽一次写进去,之后就只走 RegisterTexture 那条增量路。
+	void VulkanRendererAPI::EnsureTextureTable()
 	{
-		if (m_BatchTextureSet != nullptr)
+		if (m_TextureTableSet != nullptr)
 			return;
 
-		m_BatchTextureSet = m_DescriptorAllocator.allocateSet(k_BatchTextureSet);
+		m_TextureTableSet = m_DescriptorAllocator.allocateSet(k_TextureSet);
 
-		// 没登记的槽位也必须写一个合法的描述符进去。数组是按非一致索引取的,
-		// 验证层证明不了"那几格没被访问",只认"每一格都写过" —— 留空洞就是
-		// VUID-vkCmdDraw-None-08114,而且它拦不住,因为 descriptorBindingPartiallyBound
-		// 只是允许"未写",不允许"未写还被取"。
-		// 空洞填第一个登记过的贴图:正常的 texId 指不到那儿,填什么不影响画面。
-		vk::DescriptorImageInfo filler{};
-		for (uint32_t slot = 0; slot < k_MaxTextures; ++slot) {
-			if (m_BatchTextureUsed[slot]) {
-				filler = m_BatchTextureInfos[slot];
-				break;
-			}
-		}
-		if (filler.imageView == nullptr) {
-			throw std::runtime_error("批的纹理库一个槽位都没登记,顶点里的 texId 没有东西可指");
-		}
-
-		std::vector<vk::DescriptorImageInfo> infos(k_MaxTextures, filler);
-		for (uint32_t slot = 0; slot < k_MaxTextures; ++slot) {
-			if (m_BatchTextureUsed[slot])
-				infos[slot] = m_BatchTextureInfos[slot];
-		}
-
-		m_DescriptorAllocator.writeCombinedImageSamplers(m_BatchTextureSet,
-			k_BatchTextureBinding, 0, infos);
+		// 没写过的格不填:binding 上带着 ePartiallyBound,表里允许有空洞。
+		m_DescriptorAllocator.writeCombinedImageSamplers(m_TextureTableSet,
+			k_TextureBinding, 0, m_TextureInfos);
 	}
 
 	// 管线缓存、贴图 set 缓存和每个帧槽的描述符集都推迟到这里 —— 它们都依赖
@@ -212,6 +198,7 @@ namespace Fish {
 			return;
 
 		m_Frames.EnsureDescriptorSets(m_DescriptorAllocator);
+		EnsureTextureTable();
 
 		const vk::Format swapChainFormat = m_SwapChain.imageFormat();
 
@@ -221,7 +208,6 @@ namespace Fish {
 			return;
 		}
 
-		m_TextureSets.emplace(m_DeviceContext.get(), m_DescriptorAllocator);
 		m_PipelineCache.emplace(m_DeviceContext.get(),
 			m_DescriptorAllocator.layoutHandles(),
 			std::vector<vk::PushConstantRange>{ vk::PushConstantRange{
@@ -344,10 +330,6 @@ namespace Fish {
 			commandBuffer.pushConstants<PushConstants>(m_PipelineCache->layout(),
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
 
-			EnsureBatchTextureLibrary();
-			commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-				m_PipelineCache->layout(), k_BatchTextureSet, *m_BatchTextureSet, nullptr);
-
 			commandBuffer.bindVertexBuffers(0, *target.buffer.getHandle(), { 0 });
 			commandBuffer.draw(vertexCount, 1, 0, 0);
 		}
@@ -427,10 +409,16 @@ namespace Fish {
 		scissor.extent = extent;
 		commandBuffer.setScissor(0, scissor);
 
+		// 纹理表只绑一次,两条路共用 —— 纹理选择已经是 UBO 里的一个数,
+		// 不再是"换一张图就重绑 set 1"。所以它也就没有 per-item 的重绑可省了。
+		if (m_TextureTableSet != nullptr) {
+			commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+				m_PipelineCache->layout(), k_TextureSet, *m_TextureTableSet, nullptr);
+		}
+
 		vk::Pipeline boundPipeline = nullptr;
 		const void*  boundVertexBuffer = nullptr;
 		const void*  boundIndexBuffer = nullptr;
-		const void*  boundTexture = nullptr;
 
 		// 环形缓冲的写游标归零。放在这儿而不是帧开头是安全的:到这个点已经
 		// 等过这个帧槽的 fence,GPU 不再读它那块 UBO 了。
@@ -471,24 +459,12 @@ namespace Fish {
 			commandBuffer.pushConstants<PushConstants>(m_PipelineCache->layout(),
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
 
-			const uint32_t dynamicOffset = frame.PushObjectUbo(item.transform, item.color);
+			// 槽位跟着 UBO 走 —— 顶点格式(stride 20)塞不下第五个属性。
+			// 没有贴图的项给 0:它的管线不采样,指到哪格都一样。
+			const uint32_t texId = item.texture ? item.texture->GetBindlessIndex() : 0u;
+			const uint32_t dynamicOffset = frame.PushObjectUbo(item.transform, item.color, texId);
 			commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
 				m_PipelineCache->layout(), k_ObjectUboSet, *frame.descriptorSet(), dynamicOffset);
-
-			// 没有贴图的绘制项不绑 set 1 —— 它的管线不采样。
-			// boundTexture 不复位:描述符集绑定是持久的,set 1 还绑着上一次那张,
-			// 换回来的时候不用重绑。
-			if (item.texture) {
-				auto texture = std::dynamic_pointer_cast<VulkanTexture2D>(item.texture);
-				FS_CORE_ASSERT(texture, "DrawItem.texture 不是 Vulkan 的");
-				if (texture && texture.get() != boundTexture) {
-					vk::raii::DescriptorSet& textureSet = m_TextureSets->GetOrCreate(
-						texture->getTexture().getView(), texture->getTexture().getSampler());
-					commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-						m_PipelineCache->layout(), k_TextureSet, *textureSet, nullptr);
-					boundTexture = texture.get();
-				}
-			}
 
 			if (vertexBuffer.get() != boundVertexBuffer) {
 				commandBuffer.bindVertexBuffers(0, *vertexBuffer->buffer().getHandle(), { 0 });

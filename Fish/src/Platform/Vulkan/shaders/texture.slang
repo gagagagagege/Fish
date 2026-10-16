@@ -1,15 +1,14 @@
-// 贴图管线:顶点位置 + 纹理坐标,片元采样。
+// 贴图管线:顶点位置 + 纹理坐标,片元按 UBO 里的槽位从纹理表取图。
 //
 // PushConstants 和 ObjectUbo 的布局必须和 flat_color.slang 完全一致 ——
 // 两个 shader 共用 PipelineCache 里那唯一一条 pipeline layout。
 // color 现在要读 —— 纯色项也走这条管线,绑一张 1×1 白贴图,采样恒为 1,
-// 颜色全靠它给。两个 shader 的 ObjectUbo 布局还得一致,因为共用 pipeline layout。
+// 颜色全靠它给。
 //
-// set 1,不是 set 0 —— UBO 占着 set 0,而两个必须分开:
-// UBO 每个物体都要换 dynamic offset 重绑(绑的是同一个 set,只是偏移不同),
-// 贴图按 (view, sampler) 各自一个 set,换图时绑另一个 set。
-// 挤在一个 set 里就没法各管各的 —— 换贴图等于改写那个 set,
-// 而它可能正被在飞的命令缓冲引用。
+// set 1 是一张表,不是一个 set 一张图:shader 这侧是运行时数组,格数由 layout
+// 那侧定;贴图随时创建、槽位由后端发号,所以是边走边往表里填。
+// texId 走 UBO 不走顶点属性 —— per-item 的顶点格式是 pos3+uv2(stride 20),
+// 塞不下第五个属性,而 UBO 本来就是每物体一份、带 dynamic offset。
 
 struct PushConstants {
     float4x4 viewProj;
@@ -19,6 +18,7 @@ struct PushConstants {
 struct ObjectUbo {
     float4x4 model;
     float4   color;
+    uint     texId;      // 纹理表的槽位。纯色项不读它
 };
 [[vk::binding(0, 0)]] ConstantBuffer<ObjectUbo> ubo;
 
@@ -32,7 +32,9 @@ struct VSOutput {
     float2 fragTexCoord;
 };
 
-[[vk::binding(0, 1)]] Sampler2D albedo;
+// 索引来自 UBO = 非一致,必须 NonUniformResourceIndex。
+// 漏了不报错:驱动会按整个 subgroup 算一次描述符,采到隔壁物体的纹理。
+[[vk::binding(0, 1)]] Sampler2D albedo[];
 
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
@@ -46,5 +48,5 @@ VSOutput vertMain(VSInput input) {
 float4 fragMain(VSOutput vertIn) : SV_TARGET {
     // 纯色项绑白贴图,采样恒为 1,颜色全由 ubo.color 给;
     // 贴图项不设 color,拿的是 DrawItem 的默认值 vec4(1.0),乘上去不影响。
-    return albedo.Sample(vertIn.fragTexCoord) * ubo.color;
+    return albedo[NonUniformResourceIndex(ubo.texId)].Sample(vertIn.fragTexCoord) * ubo.color;
 }
