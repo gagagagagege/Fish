@@ -8,6 +8,10 @@
 > **2026-10-16 补:bindless 那轮(`BINDLESS_REFACTOR_TODO.md`)改动了本文两处** ——
 > 第二节对照表的「描述符集」那一行,和第四节底下的 GPU 侧契约表。**两处都就地标了更新注。**
 > 其余各节(分层、数据流、初始化顺序、所有权、销毁顺序)**没有变**。
+>
+> **2026-10-17 补:第二轮(A1 槽位回收 + A2 拆分)又改了这两处** —— set 1 现在是两条 binding
+> (图像数组 + 采样器数组),`ObjectUbo` / `BatchVertex` 各多一个 `samplerId`。
+> 另外多了一条**贴图延迟销毁**路径:析构时把 GPU 对象交给后端,等两帧再释放。
 
 ---
 
@@ -28,7 +32,7 @@
 | **谁持有资源** | 后端持有（`m_MainTexture`、`m_Pipeline` …） | **应用层持有**（layer 里的 `Ref<Shader>` / `Ref<VertexArray>` / `Ref<Texture2D>`），后端只在绘制时按需要降级访问 |
 | **管线** | 单条，`Init` 里建；shader 路径 / 入口名 / 顶点布局 / 全部固定功能状态写死在 `VulkanPipeline.cpp` | `PipelineCache`，按 `PipelineDesc` 缓存；顶点布局从 shader 反射 |
 | **描述符布局** | 写死 `binding 0 = UBO`、`binding 1 = sampler`，在构造函数里拼 | 由所有 shader 声明的绑定取**并集**推导 |
-| **描述符集** | 每帧槽一个，构造时就把唯一那张贴图绑死 | **两个 set**：set 0 = UBO（dynamic offset），set 1 = 贴图 ~~（按贴图缓存）~~ —— **2026-10-16 改成一张运行时数组,两条路共用** |
+| **描述符集** | 每帧槽一个，构造时就把唯一那张贴图绑死 | **两个 set**：set 0 = UBO（dynamic offset），set 1 = 贴图 ~~（按贴图缓存）~~ —— **2026-10-16 改成一张运行时数组,两条路共用**；**2026-10-17 又拆成图像数组 + 采样器数组两条 binding** |
 | **每物体数据** | 没有 —— 一帧一个 MVP | UBO 环形缓冲（只放 `model`，dynamic offset 索引）+ 推送常量（`viewProj` + `color`） |
 | **顶点布局的真相源** | `VulkanBuffer.h` 里的 `struct Vertex` + 两个静态函数 | **shader 自己**（SPIR-V 反射）；`stride` 由调用方给 |
 | **`Submit`** | 硬转 `OpenGLShader` 上传 uniform，然后 `DrawIndexed` | 只把 `DrawItem` 塞进队列，**不碰 GPU** |
@@ -162,9 +166,10 @@ for each item:
 | 位置 | 内容 | 谁写 |
 |---|---|---|
 | 推送常量 offset 0，**64 字节**，vertex+fragment | `{mat4 viewProj}` | per-item 每物体一次；批每批一次 |
-| 描述符 set 0 / binding 0，`eUniformBufferDynamic`，vertex+fragment | `{mat4 model; vec4 color; uint texId}`，padded 96 字节 | 环形缓冲，dynamic offset 索引 |
-| 描述符 set 1 / binding 0，`eCombinedImageSampler`，fragment | **运行时数组 `Sampler2D albedo[]`**，格数由 layout 定 | 建表时一次写完已发号的槽；之后每加一张写一格 |
-| 顶点属性 location 0…N | 由 shader 声明的 `Location` 决定 | 调用方给 `stride`，其余从反射来 |
+| 描述符 set 0 / binding 0，`eUniformBufferDynamic`，vertex+fragment | `{mat4 model; vec4 color; uint texId; uint samplerId}`，88 字节；stride 按设备对齐（本机 128） | 环形缓冲，dynamic offset 索引 |
+| 描述符 set 1 / binding 0，`eSampledImage`，fragment | **运行时数组 `Texture2D textures[]`**，格数 = min(per-stage UAB, per-set UAB, 4096) | 建表时一次写完已发号的槽；之后每加一张写一格 |
+| 描述符 set 1 / binding 1，`eSampler`，fragment | **运行时数组 `SamplerState samplers[]`**，格数 = min(per-stage UAB, per-set UAB, 256) | 同上 |
+| 顶点属性 location 0…N | 由 shader 声明的 `Location` 决定 | 调用方给 `stride`，其余从反射来（批的 stride 现在是 48） |
 
 > **一条没算过的**：`ObjectUbo.model` 和 `PushConstants.viewProj` 在 SPIR-V 里都带
 > `RowMajor` + `MatrixStride 16`，而 C++ 侧传的是 GLM 的**列主序** `mat4`。按理解这俩
@@ -172,7 +177,8 @@ for each item:
 
 这些数字的**真相源是 `.slang` 文件**（`Fish/src/Platform/Vulkan/shaders/`）。
 引擎侧的对应常量在 `VulkanDescriptorAllocator.h`（`k_ObjectUboSet` / `k_ObjectUboBinding` /
-`k_TextureSet` / `k_TextureBinding`）和 `VulkanFrameData.h`（`ObjectUbo` / `PushConstants`）。
+`k_TextureSet` / `k_TextureImageBinding` / `k_TextureSamplerBinding`）和 `VulkanFrameData.h`
+（`ObjectUbo` / `PushConstants`）。
 **两边改一边就会错，而验证层只在某些情况下会报。**
 
 ---

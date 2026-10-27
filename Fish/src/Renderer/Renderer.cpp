@@ -139,11 +139,14 @@ namespace Fish {
 		if (!vulkan)
 			return nullptr;
 
+		// 后端指针要传进去 —— 贴图析构时由它把槽位收回去。
 		auto texture = std::make_shared<VulkanTexture2D>(vulkan->m_DeviceContext.get(),
-			vulkan->m_TransientPool, path);
+			vulkan->m_TransientPool, vulkan, path);
 
 		// 槽位由后端发号,应用层不管 —— 也就没有"槽位撞了"和"登记得太晚"两种错。
-		texture->SetBindlessIndex(vulkan->RegisterTexture(texture->getTexture()));
+		const VulkanRendererAPI::BindlessTextureIndices indices =
+			vulkan->RegisterTexture(texture->getTexture());
+		texture->SetBindlessIndices(indices.image, indices.sampler);
 
 		return texture;
 	}

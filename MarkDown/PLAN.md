@@ -283,6 +283,11 @@ Java 两边都要求类名是 `Main`、文件里不能有 `package`。
 > 表里没有它的行。**但有一条"没验"要单独记**：`descriptorBindingPartiallyBound` 到底有没有
 > 挡住 `VUID-vkCmdDraw-None-08114`，是**归因**不是实测 —— 删 filler 和加 flag 是同一次改动，
 > 没做 A/B。这条和其余几条都记在 `BINDLESS_REFACTOR_TODO.md` 第六节。
+>
+> **2026-10-17 接着做了第二轮（A1 槽位回收 + A2 sampler/image 拆分）**，A3 先放着。
+> 槽位改为析构归还、延迟两帧复用；set 1 拆成图像数组 + 采样器数组两条 binding。
+> 逐项记录在 `BINDLESS_REFACTOR_TODO.md` 第九节。
+> **画面仍需真人确认；帧时对比被后台游戏污染，待机器空闲时重测。**
 
 ### 画面验收欠账登记
 

@@ -13,6 +13,7 @@ struct ObjectUbo {
     float4x4 model;
     float4   color;
     uint     texId;      // 不读,但必须留在结构里 —— 见文件头
+    uint     samplerId;  // 同上
 };
 [[vk::binding(0, 0)]] ConstantBuffer<ObjectUbo> ubo;
 

@@ -19,14 +19,16 @@ namespace Fish {
 	{
 		glm::mat4 model;
 		glm::vec4 color;
-		uint32_t  texId;     // 纹理表的槽位
+		uint32_t  texId;     // 图像表的槽位
+		uint32_t  samplerId; // 采样器表的槽位
 	};
 
 	// 字段顺序和 offset 不能改:texture.slang / flat_color.slang 里那份 ObjectUbo
 	// 必须逐字段对齐。而 AddShaderBindings 只比 set/binding/type,**不比 block 大小**,
-	// 错开是查不出来的 —— 这两条是唯一拦得住的地方。
+	// 错开是查不出来的 —— 这三条是唯一拦得住的地方。
 	static_assert(offsetof(ObjectUbo, color) == 64, "ObjectUbo.color 不在 offset 64");
 	static_assert(offsetof(ObjectUbo, texId) == 80, "ObjectUbo.texId 不在 offset 80");
+	static_assert(offsetof(ObjectUbo, samplerId) == 84, "ObjectUbo.samplerId 不在 offset 84");
 
 	struct PushConstants
 	{
@@ -56,7 +58,8 @@ namespace Fish {
 
 		void ResetObjects() { m_objectCount = 0; }
 
-		uint32_t PushObjectUbo(const glm::mat4& model, const glm::vec4& color, uint32_t texId);
+		uint32_t PushObjectUbo(const glm::mat4& model, const glm::vec4& color,
+			uint32_t texId, uint32_t samplerId);
 
 		FrameData(const FrameData&) = delete;
 		FrameData& operator=(const FrameData&) = delete;

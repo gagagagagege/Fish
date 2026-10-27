@@ -62,6 +62,9 @@ public:
 		m_BatchTexIds = { m_Texture->GetBindlessIndex(),
 		                  m_LogoTexture->GetBindlessIndex(),
 		                  m_WhiteTexture->GetBindlessIndex() };
+		m_BatchSamplerIds = { m_Texture->GetSamplerIndex(),
+		                      m_LogoTexture->GetSamplerIndex(),
+		                      m_WhiteTexture->GetSamplerIndex() };
 	}
 
 	void OnUpdate(Fish::Timestep ts)override {
@@ -91,6 +94,7 @@ public:
 				.color        = color,
 				// 三张轮着来
 				.texId        = m_BatchTexIds[i % k_BatchTextureCount],
+				.samplerId    = m_BatchSamplerIds[i % k_BatchTextureCount],
 				.tilingFactor = 1.0f });
 		}
 
@@ -174,6 +178,7 @@ private:
 	Fish::Ref<Fish::Shader> m_BatchShader;
 	Fish::Ref<Fish::Texture2D> m_WhiteTexture;
 	std::array<uint32_t, k_BatchTextureCount> m_BatchTexIds{};
+	std::array<uint32_t, k_BatchTextureCount> m_BatchSamplerIds{};
 	Fish::Ref<Fish::VertexBuffer> m_SquareVB;
 	Fish::Ref<Fish::IndexBuffer>  m_SquareIB;
 	Fish::Ref<Fish::VertexBuffer> m_TriangleVB;

@@ -5,9 +5,14 @@
 
 #include "VulkanImage.h"
 
+#include <cstdint>
+
 namespace Fish {
 	class VulkanContext;
 	class CommandPool;
+
+	// 还没登记过的槽位。0 是合法槽位，不能拿来当"没有"。
+	inline constexpr uint32_t k_InvalidBindlessIndex = ~0u;
 
 	class texture
 	{

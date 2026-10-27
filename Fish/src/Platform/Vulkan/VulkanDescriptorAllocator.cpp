@@ -136,14 +136,25 @@ namespace Fish {
 		return handles;
 	}
 
-	// 运行时数组(albedo[])反射回来的 count 是 0 —— 反射把维度那个哨兵值 0
-	// 乘进去了。格数只能由 layout 这侧定,而它同时也是槽位分配器的上界。
+	// 运行时数组(Texture2D textures[] / SamplerState samplers[])反射回来的 count
+	// 是 0 —— 反射把维度那个哨兵值 0 乘进去了。格数只能由 layout 这侧定,而它
+	// 同时也是槽位分配器的上界。两种描述符各读各的上限。
 	uint32_t DescriptorAllocator::DescriptorCount(const ReflectedDescriptorBindings::Binding& binding)
 	{
-		return binding.runtimeArray ? textureTableSize() : binding.count;
+		if (!binding.runtimeArray)
+			return binding.count;
+
+		if (binding.type == vk::DescriptorType::eSampledImage)
+			return sampledImageTableSize();
+		if (binding.type == vk::DescriptorType::eSampler)
+			return samplerTableSize();
+
+		throw std::runtime_error("DescriptorAllocator: set " + std::to_string(binding.set) +
+			" binding " + std::to_string(binding.binding) + " 的运行时数组描述符类型是 " +
+			std::to_string(static_cast<int>(binding.type)) + ",没有对应的格数来源");
 	}
 
-	uint32_t DescriptorAllocator::ComputeTextureTableSize()
+	uint32_t DescriptorAllocator::ComputeTableSize(vk::DescriptorType type)
 	{
 		const vk::PhysicalDeviceDescriptorIndexingProperties indexing =
 			m_context->physicalDevice
@@ -151,24 +162,53 @@ namespace Fish {
 				.get<vk::PhysicalDeviceDescriptorIndexingProperties>();
 
 		// 表那条 binding 带 updateAfterBind,所以算的是 UAB 的那套 limit,
-		// 不是 maxDescriptorSetSampledImages —— 两个值可以不一样。
-		return std::min(indexing.maxDescriptorSetUpdateAfterBindSampledImages, k_MaxBindlessTextures);
+		// 不是非 UAB 的那几个 —— 两组值可以不一样。
+		// per-stage 和 per-set 两条都要满足:binding 的 descriptorCount 不能超过任何一个。
+		if (type == vk::DescriptorType::eSampledImage) {
+			return std::min({ indexing.maxPerStageDescriptorUpdateAfterBindSampledImages,
+							  indexing.maxDescriptorSetUpdateAfterBindSampledImages,
+							  k_MaxBindlessTextures });
+		}
+		if (type == vk::DescriptorType::eSampler) {
+			return std::min({ indexing.maxPerStageDescriptorUpdateAfterBindSamplers,
+							  indexing.maxDescriptorSetUpdateAfterBindSamplers,
+							  k_MaxBindlessSamplers });
+		}
+
+		throw std::runtime_error("DescriptorAllocator: 描述符类型 " +
+			std::to_string(static_cast<int>(type)) + " 不支持运行时数组");
 	}
 
-	uint32_t DescriptorAllocator::textureTableSize()
+	uint32_t DescriptorAllocator::sampledImageTableSize()
 	{
-		if (m_textureTableSize != 0)
-			return m_textureTableSize;
+		if (m_sampledImageTableSize != 0)
+			return m_sampledImageTableSize;
 
 		if (m_context == nullptr)
 			throw std::runtime_error("DescriptorAllocator: 还没有 shader 登记过绑定,"
 				"查不了设备的描述符上限 —— 贴图必须在第一个 shader 之后创建");
 
-		m_textureTableSize = ComputeTextureTableSize();
-		if (m_textureTableSize == 0)
+		m_sampledImageTableSize = ComputeTableSize(vk::DescriptorType::eSampledImage);
+		if (m_sampledImageTableSize == 0)
 			throw std::runtime_error("DescriptorAllocator: 设备报的 updateAfterBind 采样图上限是 0");
 
-		return m_textureTableSize;
+		return m_sampledImageTableSize;
+	}
+
+	uint32_t DescriptorAllocator::samplerTableSize()
+	{
+		if (m_samplerTableSize != 0)
+			return m_samplerTableSize;
+
+		if (m_context == nullptr)
+			throw std::runtime_error("DescriptorAllocator: 还没有 shader 登记过绑定,"
+				"查不了设备的描述符上限 —— 采样器必须在第一个 shader 之后创建");
+
+		m_samplerTableSize = ComputeTableSize(vk::DescriptorType::eSampler);
+		if (m_samplerTableSize == 0)
+			throw std::runtime_error("DescriptorAllocator: 设备报的 updateAfterBind 采样器上限是 0");
+
+		return m_samplerTableSize;
 	}
 
 	void DescriptorAllocator::BuildPool(uint32_t set, uint32_t maxSets)
@@ -240,21 +280,9 @@ namespace Fish {
 		m_context->device.updateDescriptorSets(write, nullptr);
 	}
 
-	void DescriptorAllocator::writeCombinedImageSampler(vk::raii::DescriptorSet& set, uint32_t binding,
-		const vk::DescriptorImageInfo& info) const
-	{
-		vk::WriteDescriptorSet write{
-			.dstSet = *set,
-			.dstBinding = binding,
-			.descriptorCount = 1,
-			.descriptorType = vk::DescriptorType::eCombinedImageSampler,
-			.pImageInfo = &info };
-		m_context->device.updateDescriptorSets(write, nullptr);
-	}
-
-	// 批处理的纹理库用这个:一次写完整个数组绑定,从 firstElement 那格起。
-	// 分成 N 次单格写也行,但 dstArrayElement 要自己数,一次写更不容易错位。
-	void DescriptorAllocator::writeCombinedImageSamplers(vk::raii::DescriptorSet& set, uint32_t binding,
+	// 一次写完整个数组绑定,从 firstElement 那格起。分成 N 次单格写也行,
+	// 但 dstArrayElement 要自己数,一次写更不容易错位。
+	void DescriptorAllocator::writeSampledImages(vk::raii::DescriptorSet& set, uint32_t binding,
 		uint32_t firstElement, const std::vector<vk::DescriptorImageInfo>& infos) const
 	{
 		if (infos.empty())
@@ -265,7 +293,24 @@ namespace Fish {
 			.dstBinding = binding,
 			.dstArrayElement = firstElement,
 			.descriptorCount = static_cast<uint32_t>(infos.size()),
-			.descriptorType = vk::DescriptorType::eCombinedImageSampler,
+			.descriptorType = vk::DescriptorType::eSampledImage,
+			.pImageInfo = infos.data() };
+		m_context->device.updateDescriptorSets(write, nullptr);
+	}
+
+	// 采样器走的是同一个 vk::DescriptorImageInfo —— 里面只填 sampler 那一项。
+	void DescriptorAllocator::writeSamplers(vk::raii::DescriptorSet& set, uint32_t binding,
+		uint32_t firstElement, const std::vector<vk::DescriptorImageInfo>& infos) const
+	{
+		if (infos.empty())
+			return;
+
+		vk::WriteDescriptorSet write{
+			.dstSet = *set,
+			.dstBinding = binding,
+			.dstArrayElement = firstElement,
+			.descriptorCount = static_cast<uint32_t>(infos.size()),
+			.descriptorType = vk::DescriptorType::eSampler,
 			.pImageInfo = infos.data() };
 		m_context->device.updateDescriptorSets(write, nullptr);
 	}

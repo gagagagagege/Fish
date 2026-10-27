@@ -73,9 +73,10 @@ namespace Fish {
 		}
 	}
 
-	uint32_t FrameData::PushObjectUbo(const glm::mat4& model, const glm::vec4& color, uint32_t texId)
+	uint32_t FrameData::PushObjectUbo(const glm::mat4& model, const glm::vec4& color,
+		uint32_t texId, uint32_t samplerId)
 	{
-		const ObjectUbo data{ .model = model, .color = color, .texId = texId };
+		const ObjectUbo data{ .model = model, .color = color, .texId = texId, .samplerId = samplerId };
 		memcpy(static_cast<char*>(m_uboMappedBase) + m_objectCount * m_uboStride,
 			&data, sizeof(data));
 

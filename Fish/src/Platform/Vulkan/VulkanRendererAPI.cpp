@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Fish {
@@ -41,6 +42,7 @@ namespace Fish {
 					.color        = batch.color,
 					.uv           = glm::vec2(uv[0], uv[1]),
 					.texId        = batch.texId,
+					.samplerId    = batch.samplerId,
 					.tilingFactor = batch.tilingFactor });
 			};
 
@@ -106,34 +108,102 @@ namespace Fish {
 		}
 	}
 
-	uint32_t VulkanRendererAPI::RegisterTexture(texture& tex)
+	// 发号优先用回收回来的,没有才往上加。两个表各管各的。
+	uint32_t VulkanRendererAPI::TakeImageSlot()
+	{
+		if (!m_FreeImageSlots.empty()) {
+			const uint32_t slot = m_FreeImageSlots.back();
+			m_FreeImageSlots.pop_back();
+			return slot;
+		}
+		if (m_NextImageSlot >= m_ImageCapacity) {
+			throw std::runtime_error("纹理表满了:已经发了 " + std::to_string(m_NextImageSlot) +
+				" 个槽位,上限是 " + std::to_string(m_ImageCapacity));
+		}
+		return m_NextImageSlot++;
+	}
+
+	uint32_t VulkanRendererAPI::TakeSamplerSlot()
+	{
+		if (!m_FreeSamplerSlots.empty()) {
+			const uint32_t slot = m_FreeSamplerSlots.back();
+			m_FreeSamplerSlots.pop_back();
+			return slot;
+		}
+		if (m_NextSamplerSlot >= m_SamplerCapacity) {
+			throw std::runtime_error("采样器表满了:已经发了 " + std::to_string(m_NextSamplerSlot) +
+				" 个槽位,上限是 " + std::to_string(m_SamplerCapacity));
+		}
+		return m_NextSamplerSlot++;
+	}
+
+	VulkanRendererAPI::BindlessTextureIndices VulkanRendererAPI::RegisterTexture(texture& tex)
 	{
 		// 先问表多大 —— 表的格数就是 layout 的 descriptorCount,所以没登记过
 		// shader 时这里会抛,不会发出去一个指不到任何东西的槽位。
-		const uint32_t capacity = m_DescriptorAllocator.textureTableSize();
-		if (m_NextTextureSlot >= capacity) {
-			throw std::runtime_error("纹理表满了:已经发了 " + std::to_string(m_NextTextureSlot) +
-				" 个槽位,上限是 " + std::to_string(capacity));
-		}
+		m_ImageCapacity   = m_DescriptorAllocator.sampledImageTableSize();
+		m_SamplerCapacity = m_DescriptorAllocator.samplerTableSize();
 
-		const uint32_t slot = m_NextTextureSlot++;
-		const vk::DescriptorImageInfo info{
-			.sampler     = tex.getSampler(),
+		// 两个号一起拿。后一个抛时前一个会白丢 —— 那条路是终止进程的异常路径,
+		// 不值得为它写回滚。
+		const uint32_t imageSlot   = TakeImageSlot();
+		const uint32_t samplerSlot = TakeSamplerSlot();
+
+		const vk::DescriptorImageInfo imageInfo{
 			.imageView   = tex.getView(),
 			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+		const vk::DescriptorImageInfo samplerInfo{ .sampler = tex.getSampler() };
 
-		if (m_TextureInfos.size() < m_NextTextureSlot)
-			m_TextureInfos.resize(m_NextTextureSlot);
-		m_TextureInfos[slot] = info;
+		if (m_ImageInfos.size() <= imageSlot)
+			m_ImageInfos.resize(imageSlot + 1);
+		m_ImageInfos[imageSlot] = imageInfo;
 
-		// 表已经建出来了,那就不用等 —— 只写这一格,别的格不碰。
+		if (m_SamplerInfos.size() <= samplerSlot)
+			m_SamplerInfos.resize(samplerSlot + 1);
+		m_SamplerInfos[samplerSlot] = samplerInfo;
+
+		// 表已经建出来了,那就不用等 —— 只写这两格,别的格不碰。
 		// 这一步合法靠的是 set 上那两个 flag(见 DescriptorAllocator::BuildLayout)。
 		if (m_TextureTableSet != nullptr) {
-			m_DescriptorAllocator.writeCombinedImageSamplers(m_TextureTableSet,
-				k_TextureBinding, slot, { info });
+			m_DescriptorAllocator.writeSampledImages(m_TextureTableSet,
+				k_TextureImageBinding, imageSlot, { imageInfo });
+			m_DescriptorAllocator.writeSamplers(m_TextureTableSet,
+				k_TextureSamplerBinding, samplerSlot, { samplerInfo });
 		}
 
-		return slot;
+		return { imageSlot, samplerSlot };
+	}
+
+	void VulkanRendererAPI::ReleaseTexture(texture&& gpu, uint32_t imageSlot, uint32_t samplerSlot)
+	{
+		// 构造之后、注册之前就析构:没有任何命令引用过它,当场销毁。
+		if (imageSlot == k_InvalidBindlessIndex && samplerSlot == k_InvalidBindlessIndex)
+			return;
+
+		m_DeferredTextures.push_back(DeferredTexture{
+			.gpu         = std::move(gpu),
+			.imageSlot   = imageSlot,
+			.samplerSlot = samplerSlot,
+			.frame       = m_FrameNumber });
+	}
+
+	void VulkanRendererAPI::ReclaimTextures()
+	{
+		// 帧 #j 提交的工作用第 j 帧槽;同一槽的下一次 fence 等待在帧 #j+2 的开头。
+		// 本函数只在那个等待之后调,所以"frame + 帧在飞数 <= 当前帧号"就够。
+		while (!m_DeferredTextures.empty()) {
+			DeferredTexture& oldest = m_DeferredTextures.front();
+			if (oldest.frame + k_MaxFramesInFlight > m_FrameNumber)
+				break;
+
+			if (oldest.imageSlot != k_InvalidBindlessIndex)
+				m_FreeImageSlots.push_back(oldest.imageSlot);
+			if (oldest.samplerSlot != k_InvalidBindlessIndex)
+				m_FreeSamplerSlots.push_back(oldest.samplerSlot);
+
+			// pop_front 析构 texture —— image/view/sampler 到这一刻才真正销毁。
+			m_DeferredTextures.pop_front();
+		}
 	}
 
 	void VulkanRendererAPI::SubmitBatch(const DrawBatch& batch)
@@ -185,8 +255,10 @@ namespace Fish {
 		m_TextureTableSet = m_DescriptorAllocator.allocateSet(k_TextureSet);
 
 		// 没写过的格不填:binding 上带着 ePartiallyBound,表里允许有空洞。
-		m_DescriptorAllocator.writeCombinedImageSamplers(m_TextureTableSet,
-			k_TextureBinding, 0, m_TextureInfos);
+		m_DescriptorAllocator.writeSampledImages(m_TextureTableSet,
+			k_TextureImageBinding, 0, m_ImageInfos);
+		m_DescriptorAllocator.writeSamplers(m_TextureTableSet,
+			k_TextureSamplerBinding, 0, m_SamplerInfos);
 	}
 
 	// 管线缓存、贴图 set 缓存和每个帧槽的描述符集都推迟到这里 —— 它们都依赖
@@ -355,6 +427,10 @@ namespace Fish {
 			throw std::runtime_error("failed to wait for in-flight fence");
 		}
 
+		// 帧号在等过 fence 之后才自增 —— 这个等待才是回收判据的来源。
+		++m_FrameNumber;
+		ReclaimTextures();
+
 		frame.EnsureUboCapacity(m_DescriptorAllocator, static_cast<uint32_t>(items.size()));
 
 		auto [result, imageIndex] = m_SwapChain.handle().acquireNextImage(
@@ -459,10 +535,11 @@ namespace Fish {
 			commandBuffer.pushConstants<PushConstants>(m_PipelineCache->layout(),
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
 
-			// 槽位跟着 UBO 走 —— 顶点格式(stride 20)塞不下第五个属性。
+			// 两个槽位都跟着 UBO 走 —— 顶点格式(stride 20)塞不下更多属性。
 			// 没有贴图的项给 0:它的管线不采样,指到哪格都一样。
-			const uint32_t texId = item.texture ? item.texture->GetBindlessIndex() : 0u;
-			const uint32_t dynamicOffset = frame.PushObjectUbo(item.transform, item.color, texId);
+			const uint32_t texId     = item.texture ? item.texture->GetBindlessIndex() : 0u;
+			const uint32_t samplerId = item.texture ? item.texture->GetSamplerIndex()  : 0u;
+			const uint32_t dynamicOffset = frame.PushObjectUbo(item.transform, item.color, texId, samplerId);
 			commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
 				m_PipelineCache->layout(), k_ObjectUboSet, *frame.descriptorSet(), dynamicOffset);
 

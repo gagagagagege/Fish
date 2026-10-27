@@ -17,12 +17,14 @@ namespace Fish {
 	inline constexpr uint32_t k_ObjectUboSet     = 0;
 	inline constexpr uint32_t k_ObjectUboBinding = 0;
 	inline constexpr uint32_t k_TextureSet       = 1;
-	inline constexpr uint32_t k_TextureBinding   = 0;
+	inline constexpr uint32_t k_TextureImageBinding   = 0;   // Texture2D textures[]
+	inline constexpr uint32_t k_TextureSamplerBinding = 1;   // SamplerState samplers[]
 
-	// 纹理表的格数上界。实际取 min(设备 limit, 这个数),见 textureTableSize()。
-	// shader 写的是运行时数组(albedo[]),不带长度 —— 这个数只出现在 layout 里,
-	// 不用和 shader 对齐(以前 64 要在两处手工对齐)。
+	// 两张表的格数上界。实际各取 min(设备 limit, 这个数),见 sampledImageTableSize()
+	// / samplerTableSize()。shader 写的是运行时数组,不带长度 —— 这些数只出现在
+	// layout 里,不用和 shader 对齐(以前 64 要在两处手工对齐)。
 	inline constexpr uint32_t k_MaxBindlessTextures = 4096;
+	inline constexpr uint32_t k_MaxBindlessSamplers = 256;
 
 	inline constexpr uint32_t k_DescriptorSetBudget = 128;
 
@@ -48,15 +50,16 @@ namespace Fish {
 
 		vk::raii::DescriptorSet allocateSet(uint32_t set);
 
-		// 纹理表能装几格。layout 的 descriptorCount 和槽位分配器读的是同一个数。
+		// 两张表各能装几格。layout 的 descriptorCount 和槽位分配器读的是同一个数。
 		// 没登记过 shader 时没有设备可查,直接抛。
-		uint32_t textureTableSize();
+		uint32_t sampledImageTableSize();
+		uint32_t samplerTableSize();
 
 		void writeUniformBuffer(vk::raii::DescriptorSet& set, uint32_t binding,
 			const vk::DescriptorBufferInfo& info) const;
-		void writeCombinedImageSampler(vk::raii::DescriptorSet& set, uint32_t binding,
-			const vk::DescriptorImageInfo& info) const;
-		void writeCombinedImageSamplers(vk::raii::DescriptorSet& set, uint32_t binding,
+		void writeSampledImages(vk::raii::DescriptorSet& set, uint32_t binding,
+			uint32_t firstElement, const std::vector<vk::DescriptorImageInfo>& infos) const;
+		void writeSamplers(vk::raii::DescriptorSet& set, uint32_t binding,
 			uint32_t firstElement, const std::vector<vk::DescriptorImageInfo>& infos) const;
 
 		// 按 set 号升序的整套 layout。建 pipeline layout 时整份拿去。
@@ -67,7 +70,7 @@ namespace Fish {
 		void     BuildLayout();
 		void     BuildPool(uint32_t set, uint32_t maxSets);
 		uint32_t DescriptorCount(const ReflectedDescriptorBindings::Binding& binding);
-		uint32_t ComputeTextureTableSize();
+		uint32_t ComputeTableSize(vk::DescriptorType type);
 
 		// 哪些 set 走 updateAfterBind 那一套。shader 里表达不了这个 ——
 		// SPIR-V 只有 binding 号,没有"这个 binding 可以绑定后再改"。
@@ -79,7 +82,8 @@ namespace Fish {
 		VulkanContext* m_context = nullptr;
 
 		// 0 表示还没算过。算一次就够 —— 设备在进程生命周期里不会换。
-		uint32_t m_textureTableSize = 0;
+		uint32_t m_sampledImageTableSize = 0;
+		uint32_t m_samplerTableSize      = 0;
 
 		// layout 一旦被引用出去就不能再重建:裸句柄会悬空,而 pipeline / set
 		// 里引用的 VkDescriptorSetLayout 更不会自己更新。

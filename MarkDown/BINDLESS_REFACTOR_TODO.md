@@ -296,3 +296,77 @@ uint texId; // abs offset = 80, ..., UNUSED
 建一张能边走边填的表 → per-item 那条路并进来 → 应用层只剩 `CreateTexture2D(path)`。**
 
 链条上除了第 4 步(设备特性,当场抛 VUID),**前面任何一层错了都是静默的**。
+
+---
+
+## 九、第二轮:A1 槽位回收 + A2 sampler/image 拆分(2026-10-17)
+
+> A3(storage buffer / storage image / texel buffer)这轮没做 —— 仓库里零使用者,验证不了。
+
+### 做了什么
+
+| | 改前 | 改后 |
+|---|---|---|
+| 槽位 | 只增不减,析构不还号 | 析构归还,按帧号延迟两帧后复用 |
+| 贴图析构 | image/view/sampler 当场销毁 | 整个 `texture` 交后端,延迟两帧销毁 |
+| set 1 | 一条 binding:`Sampler2D albedo[]` | 两条:`Texture2D textures[]` + `SamplerState samplers[]` |
+| 下标 | 一个 `texId` | `texId` + `samplerId` 两个 |
+| `ObjectUbo` | 84 字节 | 88 字节(stride 仍 128,实测) |
+| `BatchVertex` | 44 字节 | 48 字节(samplerId 在 offset 40) |
+
+### A1 机制
+
+```
+~VulkanTexture2D()
+  → ReleaseTexture(std::move(m_texture), imageSlot, samplerSlot)
+       → m_DeferredTextures.push_back({gpu, slots, m_FrameNumber})
+
+DrawFrame: waitForFences 之后
+  → ++m_FrameNumber
+  → ReclaimTextures(): frame + k_MaxFramesInFlight <= m_FrameNumber 时
+        槽位进空闲表,pop_front() 当场析构 texture
+```
+
+**延迟的是 GPU 对象本身,不只是槽位号** —— 只还号的话,刚提交的命令缓冲还在采样
+image/view/sampler。帧号在等完当前帧槽 fence 之后才自增:帧 #j 提交的工作,同一帧槽
+的下一次 fence 等待在帧 #j+2 开头,和 `k_MaxFramesInFlight = 2` 是同一个数。
+
+引用计数没有新写 —— `Ref` 是 `shared_ptr`,归零的落点就是析构函数。
+`VulkanTexture2D` 持有一个裸 `VulkanRendererAPI*`,安全性依赖
+`Application::~Application` 的顺序(`WaitIdle` → layer 清空 → 后端关闭)。
+
+### A2 机制
+
+- `DescriptorCount()` 按描述符类型分支:`eSampledImage` → 图像表容量,
+  `eSampler` → 采样器表容量,其它运行时数组直接抛。
+- 两个容量各自取 `min(per-stage UAB limit, per-set UAB limit, 上限常量)`
+  (图像 4096、采样器 256)。**per-stage 那条是这轮顺手补的**,原来图像侧只读了 per-set。
+- 采样器**不去重**:每张贴图仍建自己的 sampler,占自己的槽位,析构时一起回收。
+  共享/常驻留到有真实需求时再做。
+- 设备特性一条没加(`VUID-…-descriptorBindingSampledImageUpdateAfterBind-03006`:
+  `SAMPLER` 也归 `descriptorBindingSampledImageUpdateAfterBind` 管,已经开着)。
+
+### 验证
+
+1. 构建 0 错误 0 警告。
+2. 稳态 20 秒,stderr 0 字节。
+3. resize:客户区 1600×900 → 984×661,**断言过确实变了**,stderr 0。
+4. `WM_CLOSE`:**三次都是 exit=0**(4 秒 / 60 秒 / 6 秒),stderr 0。
+   60 秒那次跑了 13815 次贴图创建+销毁。
+5. 回收探针(验完已删):每帧创建一张、释放上一张。
+   - 12 秒 **3654 次**创建/销毁,槽位 **4/5/6 轮转**,stderr 0。
+   - 每 60 帧换一次时,槽位 4/5 交替。
+6. `ObjectUbo` 加了 `samplerId` 之后 `sizeof = 88`,stride 仍是 **128**(打印确认,不是推算)。
+
+### 没验证 / 遗留
+
+| 项 | 说明 |
+|---|---|
+| **一次未复现的关闭挂起** | 最早的探针实例在 `WM_CLOSE` 后停止渲染(CPU 0),过了很久才自己退出。之后三次(4s/60s/6s)都正常 exit=0,加打印确认 8 个退出阶段全部走完。**原因不明,没复现。** |
+| **帧时对比不可用** | 这轮测到 1.43–1.52 ms,上一轮记录是 1.15–1.20。但测的时候 `r5apex_dx12` 在后台(305 秒 CPU),**数字被污染**。把采样器索引临时改成常量做 A/B:中位数 1.42 vs 1.45,说明第二个非一致索引不是主因。**要在机器空闲时重测。** |
+| **画面** | 我没亲眼看过。per-item 和批两条路都要真人开窗口确认。 |
+| **应用层缓存槽位号** | `Playground.cpp:62-64` 把发号结果存进 `m_BatchTexIds` / `m_BatchSamplerIds`,回收后不会失效。当前贴图活到进程结束,所以不咬人 |
+| **没有 generation** | 下标就是裸 `uint32`,旧号指到新贴图时无法检测(工业界的做法是打包 version) |
+| **回收后的表** | `m_ImageInfos` / `m_SamplerInfos` 里还留着已销毁对象的句柄,直到那格被复用才覆盖。没有被引用的格子,验证层不管 |
+| **采样器数组格数** | 256 是拍脑袋的上界,`maxUpdateAfterBindDescriptorsInAllPools` 没在真机上核过余量 |
+| **第一轮那条 A/B** | `ePartiallyBound` 到底挡没挡 08114,仍然没做 A/B |

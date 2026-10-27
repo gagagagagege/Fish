@@ -94,6 +94,13 @@
 | 9 | `Fish/src/Core/OrthographicCameraController.cpp:9,49,55` | 四个位置参数,两对的排列方向不一样 | 容易 | ⬜ |
 | 10 | `Fish/src/Platform/Vulkan/VulkanPipelineCache.h:44-45` | 这次改动动了绕序 | 中等 | ⬜ |
 | 11 | `VulkanPipelineCache.cpp:43` + `:60` | 这两行的输入,在场上现在只剩一个取值 | 容易 | ⬜ |
+| 12 | `Fish/src/Platform/Vulkan/VulkanTexture2D.h:46` + `Application.cpp:45-47` | 一个裸指针的寿命,靠另一处的调用顺序保证 | 中等 | ⬜ |
+| 13 | `VulkanRendererAPI.cpp:177` 记的帧号 + `:23` | 安全窗口由一个常数的值决定,而常数在别处 | 难 | ⬜ |
+| 14 | `Playground.cpp:62-67` + `VulkanRendererAPI.cpp` 的 `ReclaimTextures` | 应用层存了一份号,后端会把它发给别人 | 中等 | ⬜ |
+| 15 | `VulkanDescriptorAllocator.cpp` 的 `DescriptorCount` / `samplerTableSize` | 两个运行时数组各取上限,有一个维度没有两边同时考虑 | 中等 | ⬜ |
+| 16 | `VulkanRendererAPI.h` 的 `m_ImageInfos` / `m_SamplerInfos` | 被回收的槽位里,这两个 vector 还留着什么 | 容易 | ⬜ |
+| 17 | `VulkanRendererAPI.h:86` 的 `DeferredTexture` 声明位置 | 它依靠的是成员析构顺序 | 容易 | ⬜ |
+| 18 | `Renderer.cpp:142-149` + `VulkanTexture2D::~VulkanTexture2D` | 构造失败和注册失败走同一条路,但状态不同 | 中等 | ⬜ |
 
 **做题的方法**:先只看坐标,想清楚"会出什么事、什么条件下会出",再看下一行。
 
