@@ -1,12 +1,14 @@
 #pragma once
 #include"RendererAPI.h"
-#include"Renderer/OrthographicCamera.h"
+#include"Renderer/Camera.h"
 #include"Shader.h"
 #include"Texture.h"
 #include"DrawItem.h"
 #include"DrawBatch.h"
 #include"glm/glm.hpp"
 
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Fish {
@@ -16,11 +18,12 @@ namespace Fish {
 
 		static void Shutdown();
 
-		static void BeginScene(OrthographicCamera& camera);
+		// 键由调用方定("彩色相机"、"光源相机1")。存的是指针,相机要活得比这一帧久。
+		static void AddCamera(const std::unordered_map<std::string, Camera*>& cameras);
 		static void EndScene();
-		static void Submit(DrawItem item);
+		static void Submit(DrawItem item, const std::string& camera);
 
-		static void BatchingSubmit(DrawBatch batch);
+		static void BatchingSubmit(DrawBatch batch, const std::string& camera);
 
 		static Ref<Shader>       CreateShader(const std::string& name, const std::string& spvPath);
 		static Ref<VertexBuffer> CreateVertexBuffer(const void* data, size_t size, uint32_t stride);
@@ -40,8 +43,11 @@ namespace Fish {
 	private:
 		struct SceneData
 		{
-			glm::mat4 ViewProjectionMatrix;
+			std::unordered_map<std::string, Camera*> Cameras;
 		};
+
+		// 找不到键时断言。Release 下断言是空的,这一条还没兜底。
+		static const Camera& GetCamera(const std::string& key);
 
 		static SceneData* s_SceneData;
 

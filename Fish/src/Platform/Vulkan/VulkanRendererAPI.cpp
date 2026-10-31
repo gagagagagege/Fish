@@ -18,7 +18,8 @@ namespace Fish {
 		const std::vector<const char*> k_ValidationLayers = { "VK_LAYER_KHRONOS_validation" };
 		const std::vector<const char*> k_DeviceExtensions = {
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-			VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME
+			VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+			VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME
 		};
 		constexpr uint32_t k_MaxFramesInFlight = 2;
 
@@ -61,7 +62,8 @@ namespace Fish {
 		void transitionSwapImage(vk::raii::CommandBuffer& commandBuffer, vk::Image image,
 			vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
 			vk::AccessFlags srcAccess, vk::AccessFlags dstAccess,
-			vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage)
+			vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage,
+			vk::ImageAspectFlags aspect)
 		{
 			vk::ImageMemoryBarrier barrier{};
 			barrier.oldLayout = oldLayout;
@@ -69,7 +71,7 @@ namespace Fish {
 			barrier.srcQueueFamilyIndex = vk::QueueFamilyIgnored;
 			barrier.dstQueueFamilyIndex = vk::QueueFamilyIgnored;
 			barrier.image = image;
-			barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+			barrier.subresourceRange.aspectMask = aspect;
 			barrier.subresourceRange.baseMipLevel = 0;
 			barrier.subresourceRange.levelCount = 1;
 			barrier.subresourceRange.baseArrayLayer = 0;
@@ -272,21 +274,15 @@ namespace Fish {
 		m_Frames.EnsureDescriptorSets(m_DescriptorAllocator);
 		EnsureTextureTable();
 
-		const vk::Format swapChainFormat = m_SwapChain.imageFormat();
-
-		if (m_PipelineCache.has_value()) {
-			if (m_PipelineCache->swapChainFormat() != swapChainFormat)
-				m_PipelineCache->Invalidate(swapChainFormat);
+		if (m_PipelineCache.has_value())
 			return;
-		}
 
 		m_PipelineCache.emplace(m_DeviceContext.get(),
 			m_DescriptorAllocator.layoutHandles(),
 			std::vector<vk::PushConstantRange>{ vk::PushConstantRange{
 				.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 				.offset = 0,
-				.size = sizeof(PushConstants) } },
-			swapChainFormat);
+				.size = sizeof(PushConstants) } });
 	}
 
 	VulkanRendererAPI::~VulkanRendererAPI()
@@ -393,7 +389,9 @@ namespace Fish {
 				.fragmentModule = shader->module(),
 				.vertexEntry    = shader->vertexEntry(),
 				.fragmentEntry  = shader->fragmentEntry(),
-				.vertexStride   = k_BatchVertexStride
+				.vertexStride   = k_BatchVertexStride,
+				.colorFormat    = m_SwapChain.imageFormat(),
+				.depthFormat    = m_SwapChain.GetDepthFormat()
 			};
 			vk::raii::Pipeline& pipeline = m_PipelineCache->GetOrCreate(desc, shader->vertexInput());
 			commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
@@ -454,7 +452,18 @@ namespace Fish {
 		transitionSwapImage(commandBuffer, m_SwapChain.images()[imageIndex],
 			vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
 			vk::AccessFlagBits::eNone, vk::AccessFlagBits::eColorAttachmentWrite,
-			vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eColorAttachmentOutput);
+			vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eColorAttachmentOutput,
+			vk::ImageAspectFlagBits::eColor);
+
+		// 深度图每帧从 Undefined 开始;storeOp 是 Store,内容留着给以后的 Hi-Z。
+		transitionSwapImage(commandBuffer, m_SwapChain.GetDepthImage(imageIndex),
+			vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal,
+			vk::AccessFlagBits::eNone,
+			vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+			vk::PipelineStageFlagBits::eTopOfPipe,
+			vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+			// 没开 separateDepthStencilLayouts,组合格式的 barrier 必须把两个 aspect 都带上
+			vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil);
 
 		// 清屏在这里
 		vk::RenderingAttachmentInfo colorAttachment{};
@@ -464,11 +473,19 @@ namespace Fish {
 		colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
 		colorAttachment.clearValue = vk::ClearColorValue(m_ClearColor.r, m_ClearColor.g, m_ClearColor.b, m_ClearColor.a);
 
+		vk::RenderingAttachmentInfo depthAttachment{};
+		depthAttachment.imageView = *m_SwapChain.depthView(imageIndex);
+		depthAttachment.imageLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+		depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+		depthAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+		depthAttachment.clearValue = vk::ClearDepthStencilValue(1.0f, 0);
+
 		vk::RenderingInfo renderingInfo{};
 		renderingInfo.renderArea = vk::Rect2D{ vk::Offset2D{ 0, 0 }, m_SwapChain.extent() };
 		renderingInfo.layerCount = 1;
 		renderingInfo.colorAttachmentCount = 1;
 		renderingInfo.pColorAttachments = &colorAttachment;
+		renderingInfo.pDepthAttachment = &depthAttachment;
 
 		commandBuffer.beginRendering(renderingInfo);
 
@@ -484,6 +501,15 @@ namespace Fish {
 		vk::Rect2D scissor{};
 		scissor.extent = extent;
 		commandBuffer.setScissor(0, scissor);
+
+		// 这几项是动态状态,每帧设一次;命令缓冲每帧 reset,不会跨帧残留。
+		// ortho 翻 y 是为了抵消 Vulkan NDC 的 y 向下 —— 两次翻转抵消,屏幕上仍是逆时针。
+		commandBuffer.setCullMode(vk::CullModeFlagBits::eBack);
+		commandBuffer.setFrontFace(vk::FrontFace::eCounterClockwise);
+		commandBuffer.setPolygonModeEXT(vk::PolygonMode::eFill);
+		commandBuffer.setLineWidth(1.0f);
+		commandBuffer.setDepthTestEnable(vk::True);
+		commandBuffer.setDepthWriteEnable(vk::True);
 
 		// 纹理表只绑一次,两条路共用 —— 纹理选择已经是 UBO 里的一个数,
 		// 不再是"换一张图就重绑 set 1"。所以它也就没有 per-item 的重绑可省了。
@@ -523,7 +549,9 @@ namespace Fish {
 				.fragmentModule = shader->module(),
 				.vertexEntry    = shader->vertexEntry(),
 				.fragmentEntry  = shader->fragmentEntry(),
-				.vertexStride   = vertexBuffer->stride()
+				.vertexStride   = vertexBuffer->stride(),
+				.colorFormat    = m_SwapChain.imageFormat(),
+				.depthFormat    = m_SwapChain.GetDepthFormat()
 			};
 			vk::raii::Pipeline& pipeline = m_PipelineCache->GetOrCreate(desc, shader->vertexInput());
 			if (*pipeline != boundPipeline) {
@@ -569,7 +597,8 @@ namespace Fish {
 		transitionSwapImage(commandBuffer, m_SwapChain.images()[imageIndex],
 			vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR,
 			vk::AccessFlagBits::eColorAttachmentWrite, vk::AccessFlagBits::eNone,
-			vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eBottomOfPipe);
+			vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eBottomOfPipe,
+			vk::ImageAspectFlagBits::eColor);
 
 		commandBuffer.end();
 

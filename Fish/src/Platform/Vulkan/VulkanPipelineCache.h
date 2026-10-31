@@ -28,6 +28,16 @@ namespace Fish {
 		};
 	}
 
+	// 不混合。要用 alpha 的管线自己换成 DefaultAlphaBlend。
+	inline vk::PipelineColorBlendAttachmentState DefaultOpaqueBlend()
+	{
+		return {
+			.blendEnable    = vk::False,
+			.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+			                  vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA
+		};
+	}
+
 	// 让一条管线区别于另一条的全部输入,相等就复用
 	struct PipelineDesc
 	{
@@ -39,15 +49,14 @@ namespace Fish {
 
 		uint32_t vertexStride = 0;
 
-		vk::PrimitiveTopology topology    = vk::PrimitiveTopology::eTriangleList;
-		// 2D 一律不剔除
-		vk::CullModeFlags     cullMode    = vk::CullModeFlagBits::eNone;
-		vk::FrontFace         frontFace   = vk::FrontFace::eCounterClockwise;
-		vk::PolygonMode       polygonMode = vk::PolygonMode::eFill;
-		float                 lineWidth   = 1.0f;
-		vk::SampleCountFlagBits samples   = vk::SampleCountFlagBits::e1;
+		vk::PrimitiveTopology topology  = vk::PrimitiveTopology::eTriangleList;
+		vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1;
 
-		vk::PipelineColorBlendAttachmentState blendState = DefaultAlphaBlend();
+		// 附件格式进键:离屏目标和交换链可能同时存在,格式不同就是两条管线
+		vk::Format colorFormat = vk::Format::eUndefined;
+		vk::Format depthFormat = vk::Format::eUndefined;
+
+		vk::PipelineColorBlendAttachmentState blendState = DefaultOpaqueBlend();
 	};
 
 	bool operator==(const PipelineDesc& a, const PipelineDesc& b);
@@ -63,8 +72,7 @@ namespace Fish {
 		PipelineCache() = default;
 		PipelineCache(VulkanContext* context,
 			std::vector<vk::DescriptorSetLayout> setLayouts,
-			std::vector<vk::PushConstantRange>   pushConstantRanges,
-			vk::Format swapChainFormat);
+			std::vector<vk::PushConstantRange>   pushConstantRanges);
 
 		PipelineCache(const PipelineCache&) = delete;
 		PipelineCache& operator=(const PipelineCache&) = delete;
@@ -78,10 +86,6 @@ namespace Fish {
 
 		vk::raii::PipelineLayout& layout() { return m_layout; }
 
-		vk::Format swapChainFormat() const { return m_swapChainFormat; }
-
-		void Invalidate(vk::Format newFormat);
-
 	private:
 		std::unordered_map<PipelineDesc, vk::raii::Pipeline, PipelineDescHash> m_pipelines;
 		vk::raii::PipelineLayout m_layout = nullptr;
@@ -89,7 +93,6 @@ namespace Fish {
 		VulkanContext*                       m_context        = nullptr;
 		std::vector<vk::DescriptorSetLayout> m_setLayouts;
 		std::vector<vk::PushConstantRange>   m_pushConstants;
-		vk::Format                           m_swapChainFormat = vk::Format::eUndefined;
 	};
 
 }

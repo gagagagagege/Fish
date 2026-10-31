@@ -50,23 +50,30 @@ namespace Fish {
 		s_SceneData = nullptr;
 	}
 
-	void Renderer::BeginScene(OrthographicCamera& camera)
+	void Renderer::AddCamera(const std::unordered_map<std::string, Camera*>& cameras)
 	{
-		s_SceneData->ViewProjectionMatrix = camera.GetViewProjectionMatrix();
+		s_SceneData->Cameras = cameras;
+	}
+
+	const Camera& Renderer::GetCamera(const std::string& key)
+	{
+		const auto it = s_SceneData->Cameras.find(key);
+		FS_CORE_ASSERT(it != s_SceneData->Cameras.end(), "找不到相机");
+		return *it->second;
 	}
 
 	void Renderer::EndScene()
 	{}
 
-	void Renderer::Submit(DrawItem item)
+	void Renderer::Submit(DrawItem item, const std::string& camera)
 	{
-		item.viewProjection = s_SceneData->ViewProjectionMatrix;
+		item.viewProjection = GetCamera(camera).GetViewProjectionMatrix();
 		s_DrawQueue.push_back(std::move(item));
 	}
 
-	void Renderer::BatchingSubmit(DrawBatch batch)
+	void Renderer::BatchingSubmit(DrawBatch batch, const std::string& camera)
 	{
-		batch.viewProjection = s_SceneData->ViewProjectionMatrix;
+		batch.viewProjection = GetCamera(camera).GetViewProjectionMatrix();
 		s_RendererAPI->SubmitBatch(batch);
 	}
 

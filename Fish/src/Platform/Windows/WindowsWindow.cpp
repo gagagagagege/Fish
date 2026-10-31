@@ -164,4 +164,10 @@ namespace Fish {
 	{
 		return m_Data.VSync;
 	}
+
+	void WindowsWindow::SetCursorLocked(bool locked)
+	{
+		// DISABLED 之下 GLFW 报的是虚拟坐标,可以一直增长到窗口外,鼠标位移不会断。
+		glfwSetInputMode(m_Window, GLFW_CURSOR, locked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+	}
 }

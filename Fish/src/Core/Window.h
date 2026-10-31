@@ -33,6 +33,10 @@ namespace Fish {
 		virtual void SetVSync(bool enabled) = 0;
 		virtual bool IsVSync() const = 0;
 
+		// 鼠标看的时候把光标锁住,不然光标到窗口边缘视角就转不动了。
+		// 只有 Windows 后端有对应实现,基类留空。
+		virtual void SetCursorLocked(bool locked) {}
+
 		virtual void* GetNativeWindow() const = 0;
 
 		static Window* Create(const WindowProps& props = WindowProps());

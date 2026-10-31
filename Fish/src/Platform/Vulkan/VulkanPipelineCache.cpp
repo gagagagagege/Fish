@@ -42,11 +42,9 @@ namespace Fish {
 			&& a.fragmentEntry == b.fragmentEntry
 			&& a.vertexStride == b.vertexStride
 			&& a.topology == b.topology
-			&& a.cullMode == b.cullMode
-			&& a.frontFace == b.frontFace
-			&& a.polygonMode == b.polygonMode
-			&& a.lineWidth == b.lineWidth
 			&& a.samples == b.samples
+			&& a.colorFormat == b.colorFormat
+			&& a.depthFormat == b.depthFormat
 			&& SameBlendState(a.blendState, b.blendState);
 	}
 
@@ -59,11 +57,9 @@ namespace Fish {
 		HashCombine(seed, std::hash<std::string_view>{}(desc.fragmentEntry));
 		HashCombine(seed, std::hash<uint32_t>{}(desc.vertexStride));
 		HashCombine(seed, std::hash<int>{}(static_cast<int>(desc.topology)));
-		HashCombine(seed, std::hash<uint32_t>{}(static_cast<uint32_t>(static_cast<VkCullModeFlags>(desc.cullMode))));
-		HashCombine(seed, std::hash<int>{}(static_cast<int>(desc.frontFace)));
-		HashCombine(seed, std::hash<int>{}(static_cast<int>(desc.polygonMode)));
-		HashCombine(seed, std::hash<float>{}(desc.lineWidth));
 		HashCombine(seed, std::hash<int>{}(static_cast<int>(desc.samples)));
+		HashCombine(seed, std::hash<int>{}(static_cast<int>(desc.colorFormat)));
+		HashCombine(seed, std::hash<int>{}(static_cast<int>(desc.depthFormat)));
 		HashCombine(seed, std::hash<uint32_t>{}(static_cast<uint32_t>(desc.blendState.blendEnable)));
 		HashCombine(seed, std::hash<int>{}(static_cast<int>(desc.blendState.srcColorBlendFactor)));
 		HashCombine(seed, std::hash<int>{}(static_cast<int>(desc.blendState.dstColorBlendFactor)));
@@ -77,12 +73,10 @@ namespace Fish {
 
 	PipelineCache::PipelineCache(VulkanContext* context,
 		std::vector<vk::DescriptorSetLayout> setLayouts,
-		std::vector<vk::PushConstantRange>   pushConstantRanges,
-		vk::Format swapChainFormat)
+		std::vector<vk::PushConstantRange>   pushConstantRanges)
 		: m_context(context)
 		, m_setLayouts(std::move(setLayouts))
 		, m_pushConstants(std::move(pushConstantRanges))
-		, m_swapChainFormat(swapChainFormat)
 	{
 		vk::PipelineLayoutCreateInfo layoutInfo{};
 		layoutInfo.setLayoutCount = static_cast<uint32_t>(m_setLayouts.size());
@@ -136,10 +130,11 @@ namespace Fish {
 		vk::PipelineRasterizationStateCreateInfo rasterizer{};
 		rasterizer.depthClampEnable = vk::False;
 		rasterizer.rasterizerDiscardEnable = vk::False;
-		rasterizer.polygonMode = desc.polygonMode;
-		rasterizer.lineWidth = desc.lineWidth;
-		rasterizer.cullMode = desc.cullMode;
-		rasterizer.frontFace = desc.frontFace;
+		// 这四项都在 dynamicStates 里,实际值由录制命令给;这里填合规值过创建校验
+		rasterizer.polygonMode = vk::PolygonMode::eFill;
+		rasterizer.lineWidth = 1.0f;
+		rasterizer.cullMode = vk::CullModeFlagBits::eBack;
+		rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
 		rasterizer.depthBiasEnable = vk::False;
 
 		vk::PipelineMultisampleStateCreateInfo multisampling{};
@@ -155,7 +150,13 @@ namespace Fish {
 
 		const std::vector<vk::DynamicState> dynamicStates = {
 			vk::DynamicState::eViewport,
-			vk::DynamicState::eScissor
+			vk::DynamicState::eScissor,
+			vk::DynamicState::eCullMode,
+			vk::DynamicState::eFrontFace,
+			vk::DynamicState::ePolygonModeEXT,
+			vk::DynamicState::eLineWidth,
+			vk::DynamicState::eDepthTestEnable,
+			vk::DynamicState::eDepthWriteEnable
 		};
 		vk::PipelineDynamicStateCreateInfo dynamicState{};
 		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
@@ -163,7 +164,17 @@ namespace Fish {
 
 		vk::PipelineRenderingCreateInfo renderingCreateInfo{};
 		renderingCreateInfo.colorAttachmentCount = 1;
-		renderingCreateInfo.pColorAttachmentFormats = &m_swapChainFormat;
+		renderingCreateInfo.pColorAttachmentFormats = &desc.colorFormat;
+		renderingCreateInfo.depthAttachmentFormat = desc.depthFormat;
+
+
+		// 测试开关和写开关是动态状态,这两项会被录制命令覆盖;只有比较函数是静态的
+		vk::PipelineDepthStencilStateCreateInfo depthStencil{};
+		depthStencil.depthTestEnable       = vk::True;
+		depthStencil.depthWriteEnable      = vk::True;
+		depthStencil.depthCompareOp        = vk::CompareOp::eLessOrEqual;
+		depthStencil.depthBoundsTestEnable = vk::False;
+		depthStencil.stencilTestEnable     = vk::False;
 
 		vk::GraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.pNext = &renderingCreateInfo;
@@ -174,7 +185,7 @@ namespace Fish {
 		pipelineInfo.pViewportState = &viewportState;
 		pipelineInfo.pRasterizationState = &rasterizer;
 		pipelineInfo.pMultisampleState = &multisampling;
-		pipelineInfo.pDepthStencilState = nullptr;
+		pipelineInfo.pDepthStencilState = &depthStencil;
 		pipelineInfo.pColorBlendState = &colorBlending;
 		pipelineInfo.pDynamicState = &dynamicState;
 		pipelineInfo.layout = *m_layout;
@@ -188,12 +199,6 @@ namespace Fish {
 
 		auto inserted = m_pipelines.emplace(desc, std::move(pipeline));
 		return inserted.first->second;
-	}
-
-	void PipelineCache::Invalidate(vk::Format newFormat)
-	{
-		m_pipelines.clear();
-		m_swapChainFormat = newFormat;
 	}
 
 }

@@ -37,10 +37,11 @@ namespace Fish {
 		stagingBuffer.unmap();
 
 		texture tex;
-		tex.m_image = Image(vk::Extent2D{ static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight) },
-			vk::Format::eR8G8B8A8Srgb,
-			vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-			vk::MemoryPropertyFlagBits::eDeviceLocal, context);
+		// mip 先固定 1 层:带 mip 的导入和运行期生成都还没做,填多了后面几层没人写。
+		tex.m_image = Image(TextureDesc{
+			.extent = ImageExtent{ static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight) },
+			.format = TextureFormat::RGBA8_SRGB,
+			.mipLevels = 1 }, context);
 
 		vk::raii::CommandBuffer commandBuffer = beginSingleTimeCommands(context, transientPool);
 		tex.m_image.transitionLayout(commandBuffer, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);

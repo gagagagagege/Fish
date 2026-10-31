@@ -120,6 +120,10 @@ namespace Fish {
 		m_images = out.getImages();
 		m_imageFormat = surfaceFormat.format;
 		m_extent = extent;
+
+		// 深度图跟着交换链走:尺寸跟 extent,数量跟 imageCount。create() 是初始构造和
+		// recreate() 共用的入口,挂在这里两处都覆盖到。
+		createDepthImages();
 	}
 
 	void SwapChain::recreate()
@@ -167,6 +171,22 @@ namespace Fish {
 		for (auto& image : m_images) {
 			m_imageViews.emplace_back(Image::createView(image, m_imageFormat, m_context->device));
 		}
+	}
+
+	void SwapChain::createDepthImages()
+	{
+		// 每次整批换掉 —— 重建后 imageCount 可能变,尺寸也可能变。
+		// 旧的那批在 create() 调用点之前已经 waitIdle,可以当场销毁。
+		m_depthImages.clear();
+		m_depthImages.reserve(m_images.size());
+		for (size_t i = 0; i < m_images.size(); ++i) {
+			m_depthImages.emplace_back(ShadowMapDesc{
+				.extent = ImageExtent{ m_extent.width, m_extent.height },
+				.format = ShadowFormat::D24_UNORM_S8,
+				.layerCount = 1 }, m_context);
+		}
+		// 管线创建要用同一个格式。从建好的图上取,不在两处各写一份。
+		m_depthFormat = m_depthImages.empty() ? vk::Format::eUndefined : m_depthImages.front().getFormat();
 	}
 
 	void SwapChain::createRenderFinishedSemaphores()

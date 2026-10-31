@@ -22,6 +22,9 @@ namespace {
 	constexpr uint32_t k_InitialSpriteCount = 400;   // 改之前那两重循环是 20×20
 
 	constexpr uint32_t k_ReportIntervalFrames = 120;
+
+	// 每帧都按这个名字找相机,存一份省掉每个 sprite 一次 string 构造。
+	const std::string k_ColorCamera = "彩色相机";
 }
 
 class ExampleLayer :public Fish::Layer {
@@ -76,7 +79,7 @@ public:
 		// Render
 		Fish::Renderer::SetClearColor({ 0.1f, 0.1f, 0.1f, 1 });
 
-		Fish::Renderer::BeginScene(m_CameraController.GetCamera());
+		Fish::Renderer::AddCamera({ { k_ColorCamera, &m_CameraController.GetCamera() } });
 
 		const glm::vec4 color = glm::vec4(m_SquareColor, 1.0f);
 		glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.1f));
@@ -95,7 +98,7 @@ public:
 				// 三张轮着来
 				.texId        = m_BatchTexIds[i % k_BatchTextureCount],
 				.samplerId    = m_BatchSamplerIds[i % k_BatchTextureCount],
-				.tilingFactor = 1.0f });
+				.tilingFactor = 1.0f }, k_ColorCamera);
 		}
 
 		Fish::Renderer::Submit({
@@ -104,14 +107,14 @@ public:
 			.indexBuffer  = m_SquareIB,
 			.texture      = m_Texture,
 			.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(-0.3f, -0.5f, 0.0f))
-			                * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)) });
+			                * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)) }, k_ColorCamera);
 		Fish::Renderer::Submit({
 			.shader       = m_TextureShader,
 			.vertexBuffer = m_SquareVB,
 			.indexBuffer  = m_SquareIB,
 			.texture      = m_LogoTexture,
 			.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(0.6f, -0.5f, 0.0f))
-			                * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)) });
+			                * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)) }, k_ColorCamera);
 
 		// 3. 三角形:和上面两条同 stride、同 shader,复用同一条管线。
 		Fish::Renderer::Submit({
@@ -120,7 +123,7 @@ public:
 			.indexBuffer  = m_TriangleIB,
 			.texture      = m_WhiteTexture,
 			.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.5f, 0.0f)),
-			.color        = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) });
+			.color        = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) }, k_ColorCamera);
 
 		Fish::Renderer::EndScene();
 	}

@@ -109,6 +109,7 @@ namespace Fish {
         auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2,
             vk::PhysicalDeviceVulkan13Features,
             vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,
+            vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
             vk::PhysicalDeviceDescriptorIndexingFeatures>();
         const vk::PhysicalDeviceDescriptorIndexingFeatures& indexing =
             features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>();
@@ -116,6 +117,8 @@ namespace Fish {
             features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
             features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
             features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
+            // polygonMode 改动态要用 EDS3,这是它的一个特性位
+            features.template get<vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT>().extendedDynamicState3PolygonMode &&
             // 纹理表那张 albedo:索引来自顶点属性/UBO,所以是非一致的
             indexing.shaderSampledImageArrayNonUniformIndexing &&
             // 表是运行时数组(albedo[]),格数不写在 shader 里
@@ -154,10 +157,12 @@ namespace Fish {
 
         // query for Vulkan 1.3 features
         vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features,
-            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT, vk::PhysicalDeviceDescriptorIndexingFeatures> featureChain = {
+            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT, vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT,
+            vk::PhysicalDeviceDescriptorIndexingFeatures> featureChain = {
             {.features = {.samplerAnisotropy = true}},                   // vk::PhysicalDeviceFeatures2
             {.synchronization2 = true, .dynamicRendering = true},        // vk::PhysicalDeviceVulkan13Features
             {.extendedDynamicState = true},                              // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+            {.extendedDynamicState3PolygonMode = true},                  // vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT
             // 必须和上面 isDeviceSuitable 里那串检查一一对应 —— 少一条就是查了
             // 一个链子里没开的字段,getFeatures2 那片内存是别的东西填的。
             // 顺序必须是结构体里的声明顺序 —— 乱序 MSVC 报 C5337(非标准扩展)。

@@ -126,6 +126,11 @@ endif()
 # Debug 模式下启用断言
 target_compile_definitions(Fish PUBLIC $<$<CONFIG:Debug>:FS_DEBUG>)
 
+# glm 默认产出 GL 的 [-1,1] 深度范围，Vulkan 的裁剪体只认 [0,1]（0<=z<=w）。
+# 同时影响 glm::perspective 和 glm::ortho。PUBLIC：Playground 也 include 了 glm，
+# 两边宏不一致会让 header 里的 inline 模板出现两份定义。
+target_compile_definitions(Fish PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
 # 设置预编译头 (CMake 3.16+)
 target_precompile_headers(Fish PRIVATE "Fish/src/fspch.h")
 
