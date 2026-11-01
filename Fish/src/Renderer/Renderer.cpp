@@ -21,7 +21,7 @@ namespace Fish {
 
 	Renderer::SceneData* Renderer::s_SceneData = new Renderer::SceneData;
 
-	std::vector<DrawItem> Renderer::s_DrawQueue;
+	std::vector<RenderInstance> Renderer::s_DrawQueue;
 
 	void Renderer::Init(void* nativeWindow)
 	{
@@ -65,10 +65,11 @@ namespace Fish {
 	void Renderer::EndScene()
 	{}
 
-	void Renderer::Submit(DrawItem item, const std::string& camera)
+	void Renderer::Submit(const Instance& instance, const std::string& camera)
 	{
-		item.viewProjection = GetCamera(camera).GetViewProjectionMatrix();
-		s_DrawQueue.push_back(std::move(item));
+		s_DrawQueue.push_back(RenderInstance{
+			.instance        = instance,
+			.viewProjection  = GetCamera(camera).GetViewProjectionMatrix() });
 	}
 
 	void Renderer::BatchingSubmit(DrawBatch batch, const std::string& camera)
@@ -115,6 +116,17 @@ namespace Fish {
 			vulkan->m_DescriptorAllocator, name, spvPath);
 		s_ShaderCache.emplace(key, shader);
 		return shader;
+	}
+
+	MeshId Renderer::CreateMesh(const MeshVertex* vertices, uint32_t vertexCount,
+		const uint32_t* indices, uint32_t indexCount)
+	{
+		auto* vulkan = dynamic_cast<VulkanRendererAPI*>(s_RendererAPI);
+		FS_CORE_ASSERT(vulkan, "CreateMesh 需要 Vulkan 后端");
+		if (!vulkan)
+			return k_InvalidMeshId;
+
+		return vulkan->CreateMesh(vertices, vertexCount, indices, indexCount);
 	}
 
 	Ref<VertexBuffer> Renderer::CreateVertexBuffer(const void* data, size_t size, uint32_t stride)

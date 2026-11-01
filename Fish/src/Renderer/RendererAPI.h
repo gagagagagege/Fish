@@ -1,7 +1,7 @@
 #pragma once
 #include"glm/glm.hpp"
 #include "VertexArray.h"
-#include "DrawItem.h"
+#include "Instance.h"
 #include "DrawBatch.h"
 
 #include <vector>
@@ -44,7 +44,7 @@ namespace Fish {
 		// 命令缓冲只在这里开着。
 		//
 		// 非纯虚是为了待删的 OpenGLRendererAPI 还能实例化。
-		virtual void DrawFrame(const std::vector<DrawItem>& items)
+		virtual void DrawFrame(const std::vector<RenderInstance>& items)
 		{
 			(void)items;
 		}

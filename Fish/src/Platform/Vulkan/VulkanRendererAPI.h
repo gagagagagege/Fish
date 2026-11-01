@@ -33,8 +33,12 @@ namespace Fish {
 		virtual void NotifyWindowResized() override;
 		virtual void SetClearColor(const glm::vec4& color) override;
 		virtual void WaitIdle() override;
-		virtual void DrawFrame(const std::vector<DrawItem>& items) override;
+		virtual void DrawFrame(const std::vector<RenderInstance>& items) override;
 		virtual void SubmitBatch(const DrawBatch& batch) override;
+
+		// 顶点/索引追加进大 buffer,返回 mesh 表下标。去重不在这里做 —— loader 先判。
+		MeshId CreateMesh(const MeshVertex* vertices, uint32_t vertexCount,
+			const uint32_t* indices, uint32_t indexCount);
 
 		struct BindlessTextureIndices
 		{
@@ -95,12 +99,39 @@ namespace Fish {
 		void EnsureTextureTable();
 		void RecordBatches(vk::raii::CommandBuffer& commandBuffer);
 
+		void EnsureMeshCapacity();
+		void EnsureVertexCapacity(uint32_t needed);
+		void EnsureIndexCapacity(uint32_t needed);
+		void UploadVertices(const MeshVertex* vertices, uint32_t count, uint32_t firstVertex);
+		void UploadIndices(const uint32_t* indices, uint32_t count, uint32_t firstIndex);
+		void ReclaimBuffers();
+
 		// 帧首、等过当前帧槽的 fence 之后调 —— 那个等待才是"安全"的来源。
 		void     ReclaimTextures();
 		uint32_t TakeImageSlot();
 		uint32_t TakeSamplerSlot();
 
 		std::array<BatchState, k_BatchShapeCount> m_Batches;
+
+		// meshId 是这张表的下标,不回收;扩容只 reserve,元素位置不变。
+		std::vector<Mesh> m_Meshes;
+		uint32_t          m_MeshCapacity = 0;
+
+		// 所有 mesh 共用一份顶点/索引缓冲,按 firstVertex / firstIndex 寻址。
+		Buffer   m_MeshVertexBuffer;
+		Buffer   m_MeshIndexBuffer;
+		uint32_t m_VertexCapacity = 0;   // 能装几个顶点
+		uint32_t m_VertexCount    = 0;   // 已经用了几个
+		uint32_t m_IndexCapacity  = 0;
+		uint32_t m_IndexCount     = 0;
+
+		// 扩容换下来的旧 buffer 要等用到它的帧跑完再销毁。
+		struct DeferredBuffer
+		{
+			Buffer   buffer;
+			uint64_t frame;
+		};
+		std::deque<DeferredBuffer> m_DeferredBuffers;
 
 		// 两张表。set 建出来之前只攒着,建出来之后每加一张立刻写对应的一格 ——
 		// updateAfterBind 让"表已经录进在飞命令缓冲之后再写它"合法。

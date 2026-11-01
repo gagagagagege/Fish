@@ -12,17 +12,15 @@ playground2D::playground2D():Layer("Sandbox2D"), m_CameraController(1280.0f / 72
 	m_Shader = Fish::Renderer::CreateShader("Texture",
 		"Fish/src/Platform/Vulkan/shaders/texture.spv");
 
-	float squareVertices[5 * 4] = {
-		-0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
-		 0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
-		 0.5f,  0.5f, 0.0f, 1.0f, 1.0f,
-		-0.5f,  0.5f, 0.0f, 0.0f, 1.0f,
+	const Fish::MeshVertex squareVertices[4] = {
+		{ {-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f} },
+		{ { 0.5f, -0.5f, 0.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f} },
+		{ { 0.5f,  0.5f, 0.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f} },
+		{ {-0.5f,  0.5f, 0.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f} },
 	};
-	uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
+	const uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
 
-	m_SquareVB = Fish::Renderer::CreateVertexBuffer(
-		squareVertices, sizeof(squareVertices), 5 * sizeof(float));
-	m_SquareIB = Fish::Renderer::CreateIndexBuffer(squareIndices, 6);
+	m_SquareMesh = Fish::Renderer::CreateMesh(squareVertices, 4, squareIndices, 6);
 
 	m_WhiteTexture = Fish::Renderer::CreateTexture2D("Playground/assets/textures/White.png");
 }
@@ -55,13 +53,13 @@ void playground2D::OnUpdate(Fish::Timestep ts)
 	// 挪到右下角那条空带子里 —— 原来在原点、scale 1.5,会把 ExampleLayer
 	// 那两张贴图方块和三角形整个盖住(没有深度缓冲,只看提交顺序)。
 	Fish::Renderer::Submit({
-		.shader       = m_Shader,
-		.vertexBuffer = m_SquareVB,
-		.indexBuffer  = m_SquareIB,
-		.texture      = m_WhiteTexture,
-		.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(1.45f, -0.5f, 0.0f))
-		                * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
-		.color        = m_SquareColor }, k_ColorCamera);
+		.meshId      = m_SquareMesh,
+		.transform   = glm::translate(glm::mat4(1.0f), glm::vec3(1.45f, -0.5f, 0.0f))
+		               * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
+		.color       = m_SquareColor,
+		.textureSlot = m_WhiteTexture->GetBindlessIndex(),
+		.samplerSlot = m_WhiteTexture->GetSamplerIndex(),
+		.shader      = m_Shader }, k_ColorCamera);
 
 	Fish::Renderer::EndScene();
 }

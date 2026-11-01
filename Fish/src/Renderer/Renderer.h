@@ -3,7 +3,7 @@
 #include"Renderer/Camera.h"
 #include"Shader.h"
 #include"Texture.h"
-#include"DrawItem.h"
+#include"Instance.h"
 #include"DrawBatch.h"
 #include"glm/glm.hpp"
 
@@ -21,11 +21,16 @@ namespace Fish {
 		// 键由调用方定("彩色相机"、"光源相机1")。存的是指针,相机要活得比这一帧久。
 		static void AddCamera(const std::unordered_map<std::string, Camera*>& cameras);
 		static void EndScene();
-		static void Submit(DrawItem item, const std::string& camera);
+		static void Submit(const Instance& instance, const std::string& camera);
 
 		static void BatchingSubmit(DrawBatch batch, const std::string& camera);
 
 		static Ref<Shader>       CreateShader(const std::string& name, const std::string& spvPath);
+
+		// 顶点/索引写进后端的大 buffer,返回 mesh 表里的下标。
+		static MeshId CreateMesh(const MeshVertex* vertices, uint32_t vertexCount,
+			const uint32_t* indices, uint32_t indexCount);
+
 		static Ref<VertexBuffer> CreateVertexBuffer(const void* data, size_t size, uint32_t stride);
 		static Ref<IndexBuffer>  CreateIndexBuffer(const uint32_t* indices, uint32_t count);
 
@@ -53,7 +58,7 @@ namespace Fish {
 
 		static RendererAPI* s_RendererAPI;
 
-		static std::vector<DrawItem> s_DrawQueue;
+		static std::vector<RenderInstance> s_DrawQueue;
 
 	};
 }

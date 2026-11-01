@@ -1,6 +1,6 @@
 # 3D 迁移 TODO
 
-> 建立于 2026-10-28,2026-10-30 按依赖重排。
+> 建立于 2026-10-28,2026-10-30 按依赖重排,2026-11-01 阶段 4 设计定稿。
 > 顺序按"一条渲染路径从 2D 到 3D 依次要解决的问题"排,原来的 L0–L6 层号不再作为顺序(对照表在最后)。
 > 状态只有三种:**已完成** / **可做**(前置都在) / **阻塞**(等某一阶段)。
 
@@ -94,6 +94,16 @@
 | 阴影相机 | `ShadowCamera` 不乘 y 取反;绕序和屏幕相机相反,阴影 pass 要单独定 frontFace / cull |
 | 深度约定 | `GLM_FORCE_DEPTH_ZERO_TO_ONE`,PUBLIC |
 | 相机控制 | 照搬 UE 编辑器飞行相机的非物理分支:WASD + 右键锁光标,Space/Ctrl 上下,C/Z 改 FOV;速度写死 |
+| 网格加载器 | Assimp 走 git submodule + `add_subdirectory`,只编 GLTF/OBJ;loader 放 `Renderer/MeshImporter`,`.h` 不暴露 `ai*` 类型 |
+| 后处理开关 | `Triangulate`、`JoinIdenticalVertices`、`GenSmoothNormals`、`SortByPType`(移除点线)、`ImproveCacheLocality`;glTF/GLB 另加 `FlipUVs`,OBJ 不加 |
+| 顶点格式 | `MeshVertex` = pos3 + uv2 + normal3,32 字节,offset 0/12/20;法线本轮存进 buffer,shader 不读 |
+| 几何存储 | 所有 mesh 进后端大 VB/IB;`Mesh` 只存 `firstVertex`/`vertexCount`/`firstIndex`/`indexCount`/局部 AABB;不存材质、名字、哈希 |
+| 去重 | 在 loader 内完成:先按 `aiMesh` 下标复用,再内容哈希 + 逐字节比较;只覆盖一次导入;hash 不存进 Mesh |
+| Mesh/Instance | Mesh 是几何;Instance = meshId + transform + color + textureSlot + samplerSlot + shader;tiling 暂不加 |
+| 材质 | 归 Instance;Mesh 不存 `mMaterialIndex` |
+| 提交 | `SceneInstance` 跨帧持久,每帧循环 `Submit(instance, camera)`;loader 返回 `SceneInstance`,收一个 shader 填进每个实例 |
+| 遍历规则 | 节点矩阵连乘;每个 `aiMesh` 一个 Instance;蒙皮 mesh 跳过;缺 UV 填 (0,0);多套 UV 用第 0 套 |
+| 扩容 | Mesh 表 64 条、VB 65536 顶点、IB 131072 索引起步,均 ×1.5;旧大 buffer 延迟 `k_MaxFramesInFlight` 帧销毁 |
 
 ---
 
@@ -106,14 +116,21 @@
 | 3 | ~~y 翻转落点~~ ✅ **已完成 2026-10-31** | 从 ortho 参数挪到 VP 合成(`k_FlipY`);`frontFace` 不变 |
 | 4 | ~~相机控制~~ ⚠️ **代码完成 2026-10-31,未接线** | 新增 `PerspectiveCameraController`(照搬 UE 编辑器飞行相机的非物理分支)+ `Window::SetCursorLocked`;没有 layer 用它,运行期没跑过 |
 
-## 阶段 4 · 几何 —— 阻塞(等阶段 3)
+## 阶段 4 · 几何 —— 可做(第一版跑通,2026-11-01)
 
-| # | 事项 | 现状 |
+前置:阶段 3 #1–#3 已完成;阶段 3 #4(相机控制器接线)和几何无关,不阻塞。
+
+| # | 事项 | 状态 |
 |---|---|---|
-| 1 | 网格数据来源 | 无加载器;vendor 只有 spdlog/GLFW/glm/imgui/stb_image |
-| 2 | 顶点加法线 | per-item 顶点 pos3 + uv2,stride 20;`texture.slang:26-29` 只有两个输入;offset 由前缀和推(`VulkanReflection.cpp:152-161`),shader 声明顺序必须等于内存顺序 |
-| 3 | 索引位宽 | 只收 `uint32_t*`(`Renderer.h:27`),`drawIndexed` 写死 `eUint32`(`VulkanRendererAPI.cpp:585`) |
-| 4 | 批的顶点格式 | `BatchVertex` 48 字节、7 条 `static_assert`(`DrawBatch.h:21-41`);批是 2D 精灵,法线可以先不加 |
+| 1 | 网格数据来源 | Assimp v6.0.5(子模块)+ `Renderer/MeshImporter`;`cube.obj` 已跑通 |
+| 2 | 顶点加法线 | `MeshVertex` pos3 + uv2 + normal3 = 32B 已用;shader 不读 normal,阶段 5 再接 |
+| 3 | 索引位宽 | 保持 uint32 |
+| 4 | 批的顶点格式 | 保持 `BatchVertex` 48 字节,不动 |
+
+环境备注:
+
+- Assimp 子模块锁在 `v6.0.5`;它会把 `CMAKE_DEBUG_POSTFIX=d` 写进全局 cache,`CMakeLists.txt` 在 `add_subdirectory` 之后强制清空,否则 `Fish.lib` 会改名 `Fishd.lib`。
+- Assimp 6 的 `aiString` 取 C 字符串是 `C_Str()`,不是 `CStr()`。
 
 ## 阶段 5 · 光照 —— 阻塞(等阶段 4)
 
@@ -159,6 +176,14 @@
 - 阶段 3 #1 改完之后的画面同样没有真人目视。
 - `PerspectiveCameraController` 没有接线:光标锁定、鼠标看、移动、FOV 缩放全都没有在运行期跑过。
 - 阶段 3 的所有改动只在正交那条老路径上验过(它仍走 `OrthographicCamera`)。
+- 阶段 4 第一版已落地(2026-11-01):`MeshVertex`/`Mesh`/`Instance`/`SceneInstance`、后端大 VB/IB + mesh 表、`CreateMesh`/`Submit`、Assimp v6.0.5 + `ImportScene`。原有 2D 几何改走 meshId,新增一个 `cube.obj` 测试导入。
+- 导入只跑过一个没有 UV、没有法线、无骨骼的 OBJ;glTF 路径、缺 UV 分支、蒙皮跳过分支、跨 mesh 内容去重都没在运行期触发过。
+- 大 buffer 的 1.5 倍扩容 + 旧 buffer 延迟销毁分支没在运行期触发过:当前只有 3 个 mesh,远低于初始容量。
+- `DrawItem.h` 已无调用者但还没删;`CreateVertexBuffer`/`CreateIndexBuffer` 也没有调用者了。
+- 法线已经进顶点布局,但 `texture.slang` 不读;阶段 5 加光照时才验证 offset 20。
+- 导入只支持静态几何:蒙皮 mesh 跳过,不导入材质/贴图,`textureSlot` 留 0。
+- 大 buffer 的扩容 + 旧 buffer 延迟销毁只有设计,没跑过。
+- 跨导入去重不做;相同几何在不同文件里各占一份。
 
 ## 旧层号对照
 

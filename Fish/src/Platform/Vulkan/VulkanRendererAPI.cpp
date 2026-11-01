@@ -34,6 +34,11 @@ namespace Fish {
 		constexpr uint32_t k_InitialTriangleVertices = 3000;
 		constexpr uint32_t k_InitialQuadVertices     = 60000;
 
+		// mesh 表 / 大 buffer 的起始容量。扩容都是 1.5 倍(整数除以 2)。
+		constexpr uint32_t k_InitialMeshCount    = 64;
+		constexpr uint32_t k_InitialMeshVertices = 65536;
+		constexpr uint32_t k_InitialMeshIndices  = 131072;
+
 		void AppendShapeVertices(std::vector<BatchVertex>& out, const DrawBatch& batch)
 		{
 			auto emit = [&](const float local[2], const float uv[2]) {
@@ -108,6 +113,9 @@ namespace Fish {
 		for (BatchState& batch : m_Batches) {
 			batch.frames.resize(k_MaxFramesInFlight);
 		}
+
+		m_Meshes.reserve(k_InitialMeshCount);
+		m_MeshCapacity = k_InitialMeshCount;
 	}
 
 	// 发号优先用回收回来的,没有才往上加。两个表各管各的。
@@ -245,6 +253,146 @@ namespace Fish {
 		target.buffer = std::move(buffer);
 		target.mapped = mapped;
 		target.capacity = capacity;
+	}
+
+	void VulkanRendererAPI::EnsureMeshCapacity()
+	{
+		if (m_Meshes.size() < m_MeshCapacity)
+			return;
+
+		const uint32_t capacity = std::max(k_InitialMeshCount, m_MeshCapacity * 3 / 2);
+		m_Meshes.reserve(capacity);
+		m_MeshCapacity = capacity;
+	}
+
+	void VulkanRendererAPI::EnsureVertexCapacity(uint32_t needed)
+	{
+		if (needed <= m_VertexCapacity)
+			return;
+
+		const uint32_t capacity = std::max(needed,
+			std::max(k_InitialMeshVertices, m_VertexCapacity * 3 / 2));
+
+		Buffer newBuffer(static_cast<vk::DeviceSize>(capacity) * k_MeshVertexStride,
+			vk::BufferUsageFlagBits::eVertexBuffer |
+			vk::BufferUsageFlagBits::eTransferSrc |
+			vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			m_DeviceContext.get());
+
+		// 旧 buffer 可能还被在飞的帧引用,交进延迟队列,等帧号过两帧再销毁。
+		if (m_VertexCapacity > 0) {
+			const vk::DeviceSize oldBytes =
+				static_cast<vk::DeviceSize>(m_VertexCapacity) * k_MeshVertexStride;
+			newBuffer.copyBuffer(m_MeshVertexBuffer.getHandle(), 0, 0, oldBytes, m_TransientPool);
+			m_DeferredBuffers.push_back(DeferredBuffer{
+				.buffer = std::move(m_MeshVertexBuffer), .frame = m_FrameNumber });
+		}
+
+		m_MeshVertexBuffer = std::move(newBuffer);
+		m_VertexCapacity = capacity;
+	}
+
+	void VulkanRendererAPI::EnsureIndexCapacity(uint32_t needed)
+	{
+		if (needed <= m_IndexCapacity)
+			return;
+
+		const uint32_t capacity = std::max(needed,
+			std::max(k_InitialMeshIndices, m_IndexCapacity * 3 / 2));
+
+		Buffer newBuffer(static_cast<vk::DeviceSize>(capacity) * sizeof(uint32_t),
+			vk::BufferUsageFlagBits::eIndexBuffer |
+			vk::BufferUsageFlagBits::eTransferSrc |
+			vk::BufferUsageFlagBits::eTransferDst,
+			vk::MemoryPropertyFlagBits::eDeviceLocal,
+			m_DeviceContext.get());
+
+		if (m_IndexCapacity > 0) {
+			const vk::DeviceSize oldBytes =
+				static_cast<vk::DeviceSize>(m_IndexCapacity) * sizeof(uint32_t);
+			newBuffer.copyBuffer(m_MeshIndexBuffer.getHandle(), 0, 0, oldBytes, m_TransientPool);
+			m_DeferredBuffers.push_back(DeferredBuffer{
+				.buffer = std::move(m_MeshIndexBuffer), .frame = m_FrameNumber });
+		}
+
+		m_MeshIndexBuffer = std::move(newBuffer);
+		m_IndexCapacity = capacity;
+	}
+
+	void VulkanRendererAPI::UploadVertices(const MeshVertex* vertices, uint32_t count, uint32_t firstVertex)
+	{
+		const vk::DeviceSize bytes = static_cast<vk::DeviceSize>(count) * sizeof(MeshVertex);
+
+		Buffer staging(bytes, vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			m_DeviceContext.get());
+
+		memcpy(staging.map(0, bytes), vertices, static_cast<size_t>(bytes));
+		staging.unmap();
+
+		m_MeshVertexBuffer.copyBuffer(staging.getHandle(), 0,
+			static_cast<vk::DeviceSize>(firstVertex) * k_MeshVertexStride, bytes, m_TransientPool);
+	}
+
+	void VulkanRendererAPI::UploadIndices(const uint32_t* indices, uint32_t count, uint32_t firstIndex)
+	{
+		const vk::DeviceSize bytes = static_cast<vk::DeviceSize>(count) * sizeof(uint32_t);
+
+		Buffer staging(bytes, vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			m_DeviceContext.get());
+
+		memcpy(staging.map(0, bytes), indices, static_cast<size_t>(bytes));
+		staging.unmap();
+
+		m_MeshIndexBuffer.copyBuffer(staging.getHandle(), 0,
+			static_cast<vk::DeviceSize>(firstIndex) * sizeof(uint32_t), bytes, m_TransientPool);
+	}
+
+	MeshId VulkanRendererAPI::CreateMesh(const MeshVertex* vertices, uint32_t vertexCount,
+		const uint32_t* indices, uint32_t indexCount)
+	{
+		if (vertices == nullptr || vertexCount == 0)
+			return k_InvalidMeshId;
+		if (indexCount > 0 && indices == nullptr)
+			return k_InvalidMeshId;
+
+		EnsureVertexCapacity(m_VertexCount + vertexCount);
+		EnsureIndexCapacity(m_IndexCount + indexCount);
+
+		UploadVertices(vertices, vertexCount, m_VertexCount);
+		if (indexCount > 0)
+			UploadIndices(indices, indexCount, m_IndexCount);
+
+		Mesh mesh{};
+		mesh.firstVertex = m_VertexCount;
+		mesh.vertexCount = vertexCount;
+		mesh.firstIndex  = m_IndexCount;
+		mesh.indexCount  = indexCount;
+		mesh.aabbMin = vertices[0].position;
+		mesh.aabbMax = vertices[0].position;
+		for (uint32_t i = 1; i < vertexCount; ++i) {
+			mesh.aabbMin = glm::min(mesh.aabbMin, vertices[i].position);
+			mesh.aabbMax = glm::max(mesh.aabbMax, vertices[i].position);
+		}
+
+		m_VertexCount += vertexCount;
+		m_IndexCount  += indexCount;
+
+		EnsureMeshCapacity();
+		m_Meshes.push_back(mesh);
+		return static_cast<MeshId>(m_Meshes.size() - 1);
+	}
+
+	void VulkanRendererAPI::ReclaimBuffers()
+	{
+		while (!m_DeferredBuffers.empty()) {
+			DeferredBuffer& oldest = m_DeferredBuffers.front();
+			if (oldest.frame + k_MaxFramesInFlight > m_FrameNumber)
+				break;
+			m_DeferredBuffers.pop_front();
+		}
 	}
 
 	// 表是懒建的:格数要在 layout 出来之后才知道(那是第一个 shader 的事)。
@@ -410,7 +558,7 @@ namespace Fish {
 	}
 
 	//TODO: item循环里的dynamic_cast
-	void VulkanRendererAPI::DrawFrame(const std::vector<DrawItem>& items)
+	void VulkanRendererAPI::DrawFrame(const std::vector<RenderInstance>& items)
 	{
 		EnsureRenderState();
 
@@ -428,6 +576,7 @@ namespace Fish {
 		// 帧号在等过 fence 之后才自增 —— 这个等待才是回收判据的来源。
 		++m_FrameNumber;
 		ReclaimTextures();
+		ReclaimBuffers();
 
 		frame.EnsureUboCapacity(m_DescriptorAllocator, static_cast<uint32_t>(items.size()));
 
@@ -519,37 +668,32 @@ namespace Fish {
 		}
 
 		vk::Pipeline boundPipeline = nullptr;
-		const void*  boundVertexBuffer = nullptr;
-		const void*  boundIndexBuffer = nullptr;
+		bool         meshBuffersBound = false;
 
 		// 环形缓冲的写游标归零。放在这儿而不是帧开头是安全的:到这个点已经
 		// 等过这个帧槽的 fence,GPU 不再读它那块 UBO 了。
 		frame.ResetObjects();
 
-		for (const DrawItem& item : items) {
-			auto shader = std::dynamic_pointer_cast<VulkanShader>(item.shader);
-			FS_CORE_ASSERT(shader, "DrawItem.shader 不是 Vulkan 的");
+		for (const RenderInstance& item : items) {
+			const Instance& instance = item.instance;
+
+			auto shader = std::dynamic_pointer_cast<VulkanShader>(instance.shader);
+			FS_CORE_ASSERT(shader, "Instance.shader 不是 Vulkan 的");
 			if (!shader)
 				continue;
 
-			auto vertexBuffer = std::dynamic_pointer_cast<VulkanVertexBuffer>(item.vertexBuffer);
-			FS_CORE_ASSERT(vertexBuffer, "DrawItem.vertexBuffer 不是 Vulkan 的");
-			if (!vertexBuffer)
+			if (instance.meshId >= m_Meshes.size()) {
+				FS_CORE_ASSERT(false, "Instance.meshId 超出 mesh 表");
 				continue;
-
-			auto indexBuffer = std::dynamic_pointer_cast<VulkanIndexBuffer>(item.indexBuffer);
-			if (item.indexBuffer) {
-				FS_CORE_ASSERT(indexBuffer, "DrawItem.indexBuffer 不是 Vulkan 的");
-				if (!indexBuffer)
-					continue;
 			}
+			const Mesh& mesh = m_Meshes[instance.meshId];
 
 			PipelineDesc desc{
 				.vertexModule   = shader->module(),
 				.fragmentModule = shader->module(),
 				.vertexEntry    = shader->vertexEntry(),
 				.fragmentEntry  = shader->fragmentEntry(),
-				.vertexStride   = vertexBuffer->stride(),
+				.vertexStride   = k_MeshVertexStride,
 				.colorFormat    = m_SwapChain.imageFormat(),
 				.depthFormat    = m_SwapChain.GetDepthFormat()
 			};
@@ -563,29 +707,25 @@ namespace Fish {
 			commandBuffer.pushConstants<PushConstants>(m_PipelineCache->layout(),
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
 
-			// 两个槽位都跟着 UBO 走 —— 顶点格式(stride 20)塞不下更多属性。
-			// 没有贴图的项给 0:它的管线不采样,指到哪格都一样。
-			const uint32_t texId     = item.texture ? item.texture->GetBindlessIndex() : 0u;
-			const uint32_t samplerId = item.texture ? item.texture->GetSamplerIndex()  : 0u;
-			const uint32_t dynamicOffset = frame.PushObjectUbo(item.transform, item.color, texId, samplerId);
+			const uint32_t dynamicOffset = frame.PushObjectUbo(instance.transform, instance.color,
+				instance.textureSlot, instance.samplerSlot);
 			commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
 				m_PipelineCache->layout(), k_ObjectUboSet, *frame.descriptorSet(), dynamicOffset);
 
-			if (vertexBuffer.get() != boundVertexBuffer) {
-				commandBuffer.bindVertexBuffers(0, *vertexBuffer->buffer().getHandle(), { 0 });
-				boundVertexBuffer = vertexBuffer.get();
+			// 所有 mesh 共用一份顶点/索引缓冲,这里只绑一次。
+			if (!meshBuffersBound) {
+				commandBuffer.bindVertexBuffers(0, *m_MeshVertexBuffer.getHandle(), { 0 });
+				commandBuffer.bindIndexBuffer(*m_MeshIndexBuffer.getHandle(), 0,
+					vk::IndexType::eUint32);
+				meshBuffersBound = true;
 			}
 
-			if (indexBuffer) {
-				if (indexBuffer.get() != boundIndexBuffer) {
-					commandBuffer.bindIndexBuffer(*indexBuffer->buffer().getHandle(), 0,
-						vk::IndexType::eUint32);
-					boundIndexBuffer = indexBuffer.get();
-				}
-				commandBuffer.drawIndexed(indexBuffer->GetCount(), 1, 0, 0, 0);
+			if (mesh.indexCount > 0) {
+				commandBuffer.drawIndexed(mesh.indexCount, 1, mesh.firstIndex,
+					static_cast<int32_t>(mesh.firstVertex), 0);
 			}
 			else {
-				commandBuffer.draw(vertexBuffer->count(), 1, 0, 0);
+				commandBuffer.draw(mesh.vertexCount, 1, mesh.firstVertex, 0);
 			}
 		}
 

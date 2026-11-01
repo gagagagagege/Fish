@@ -30,6 +30,23 @@ add_subdirectory(Fish/vendor/spdlog EXCLUDE_FROM_ALL)
 add_subdirectory(Fish/vendor/GLFW EXCLUDE_FROM_ALL)
 add_subdirectory(Fish/vendor/glm EXCLUDE_FROM_ALL)
 
+# Assimp — 只编 glTF/OBJ 两个导入器;导出器、工具、测试、样例全关。
+set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ALL_EXPORTERS_BY_DEFAULT OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+# 不往全局 CMAKE_DEBUG_POSTFIX 里塞 "d" —— 那会把 Fish.lib 改名成 Fishd.lib。
+set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
+add_subdirectory(Fish/vendor/assimp EXCLUDE_FROM_ALL)
+# Assimp 会把 CMAKE_DEBUG_POSTFIX=d 写进全局 cache;清掉,保住 Fish.lib /
+# glfw3.lib / glad.lib 这些原来的名字。
+set(CMAKE_DEBUG_POSTFIX "" CACHE STRING "" FORCE)
+
 # ImGui — 纯源码头文件库，没有自带的 CMakeLists，手动编译
 set(IMGUI_DIR Fish/vendor/imgui)
 add_library(imgui STATIC
@@ -136,6 +153,8 @@ target_precompile_headers(Fish PRIVATE "Fish/src/fspch.h")
 
 # 链接。PUBLIC会让链接Fish的Playground也能找到它们。
 target_link_libraries(Fish PUBLIC spdlog::spdlog glfw glad imgui glm::glm)
+# loader 的实现细节,不往应用层暴露 assimp 类型。
+target_link_libraries(Fish PRIVATE assimp)
 
 # ---- Vulkan 后端（Fish/src/Platform/Vulkan）----
 # 定义与 vulkan_project/CMakeLists.txt:82-91 对齐。其中最后一条关键：

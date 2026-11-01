@@ -1,5 +1,6 @@
 #include"imgui.h"
 #include"includings.h"
+#include"Renderer/MeshImporter.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -34,28 +35,23 @@ public:
 		m_FlatColorShader = Fish::Renderer::CreateShader("FlatColor", shaderDir + "flat_color.spv");
 		m_TextureShader   = Fish::Renderer::CreateShader("Texture",   shaderDir + "texture.spv");
 		m_BatchShader     = Fish::Renderer::CreateShader("Batch",     shaderDir + "batch.spv");
-		//flat color
-		float triangleVertices[3 * 5] = {
-			-0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
-			 0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
-			 0.0f,  0.5f, 0.0f, 0.5f, 1.0f
+		// 顶点格式统一成 pos3 + uv2 + normal3;法线这轮只存,shader 不读。
+		const Fish::MeshVertex triangleVertices[3] = {
+			{ {-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f} },
+			{ { 0.5f, -0.5f, 0.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f} },
+			{ { 0.0f,  0.5f, 0.0f}, {0.5f, 1.0f}, {0.0f, 0.0f, 1.0f} },
 		};
-		uint32_t triangleIndices[3] = { 0, 1, 2 };
-		m_TriangleVB = Fish::Renderer::CreateVertexBuffer(
-			triangleVertices, sizeof(triangleVertices), 5 * sizeof(float));
-		m_TriangleIB = Fish::Renderer::CreateIndexBuffer(triangleIndices, 3);
+		const uint32_t triangleIndices[3] = { 0, 1, 2 };
+		m_TriangleMesh = Fish::Renderer::CreateMesh(triangleVertices, 3, triangleIndices, 3);
 
-		// 方块:pos3 + uv2,stride 20
-		float squareVertices[5 * 4] = {
-			-0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
-			 0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
-			 0.5f,  0.5f, 0.0f, 1.0f, 1.0f,
-			-0.5f,  0.5f, 0.0f, 0.0f, 1.0f,
+		const Fish::MeshVertex squareVertices[4] = {
+			{ {-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f} },
+			{ { 0.5f, -0.5f, 0.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f} },
+			{ { 0.5f,  0.5f, 0.0f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f} },
+			{ {-0.5f,  0.5f, 0.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f} },
 		};
-		uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
-		m_SquareVB = Fish::Renderer::CreateVertexBuffer(
-			squareVertices, sizeof(squareVertices), 5 * sizeof(float));
-		m_SquareIB = Fish::Renderer::CreateIndexBuffer(squareIndices, 6);
+		const uint32_t squareIndices[6] = { 0, 1, 2, 2, 3, 0 };
+		m_SquareMesh = Fish::Renderer::CreateMesh(squareVertices, 4, squareIndices, 6);
 
 		m_Texture      = Fish::Renderer::CreateTexture2D("Playground/assets/textures/Checkerboard.png");
 		m_LogoTexture  = Fish::Renderer::CreateTexture2D("Playground/assets/textures/ChernoLogo.png");
@@ -68,6 +64,10 @@ public:
 		m_BatchSamplerIds = { m_Texture->GetSamplerIndex(),
 		                      m_LogoTexture->GetSamplerIndex(),
 		                      m_WhiteTexture->GetSamplerIndex() };
+
+		// 导入路径的第一个测试资产:纯色 shader,不采样,textureSlot 留 0 没问题。
+		m_ImportedScene = Fish::ImportScene(
+			"Playground/assets/models/cube.obj", m_FlatColorShader);
 	}
 
 	void OnUpdate(Fish::Timestep ts)override {
@@ -102,28 +102,39 @@ public:
 		}
 
 		Fish::Renderer::Submit({
-			.shader       = m_TextureShader,
-			.vertexBuffer = m_SquareVB,
-			.indexBuffer  = m_SquareIB,
-			.texture      = m_Texture,
-			.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(-0.3f, -0.5f, 0.0f))
-			                * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)) }, k_ColorCamera);
+			.meshId      = m_SquareMesh,
+			.transform   = glm::translate(glm::mat4(1.0f), glm::vec3(-0.3f, -0.5f, 0.0f))
+			               * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)),
+			.textureSlot = m_Texture->GetBindlessIndex(),
+			.samplerSlot = m_Texture->GetSamplerIndex(),
+			.shader      = m_TextureShader }, k_ColorCamera);
 		Fish::Renderer::Submit({
-			.shader       = m_TextureShader,
-			.vertexBuffer = m_SquareVB,
-			.indexBuffer  = m_SquareIB,
-			.texture      = m_LogoTexture,
-			.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(0.6f, -0.5f, 0.0f))
-			                * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)) }, k_ColorCamera);
+			.meshId      = m_SquareMesh,
+			.transform   = glm::translate(glm::mat4(1.0f), glm::vec3(0.6f, -0.5f, 0.0f))
+			               * glm::scale(glm::mat4(1.0f), glm::vec3(0.8f)),
+			.textureSlot = m_LogoTexture->GetBindlessIndex(),
+			.samplerSlot = m_LogoTexture->GetSamplerIndex(),
+			.shader      = m_TextureShader }, k_ColorCamera);
 
 		// 3. 三角形:和上面两条同 stride、同 shader,复用同一条管线。
 		Fish::Renderer::Submit({
-			.shader       = m_TextureShader,
-			.vertexBuffer = m_TriangleVB,
-			.indexBuffer  = m_TriangleIB,
-			.texture      = m_WhiteTexture,
-			.transform    = glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.5f, 0.0f)),
-			.color        = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f) }, k_ColorCamera);
+			.meshId      = m_TriangleMesh,
+			.transform   = glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, -0.5f, 0.0f)),
+			.textureSlot = m_WhiteTexture->GetBindlessIndex(),
+			.samplerSlot = m_WhiteTexture->GetSamplerIndex(),
+			.shader      = m_TextureShader }, k_ColorCamera);
+
+		// 4. 导入的立方体:绕 Y 转 30°,确认节点变换和法线生成没把几何弄歪。
+		const glm::mat4 importTransform =
+			glm::translate(glm::mat4(1.0f), glm::vec3(-1.3f, 0.7f, 0.0f))
+			* glm::rotate(glm::mat4(1.0f), glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f))
+			* glm::scale(glm::mat4(1.0f), glm::vec3(0.45f));
+		for (const Fish::Instance& imported : m_ImportedScene.instances) {
+			Fish::Instance instance = imported;
+			instance.transform = importTransform * instance.transform;
+			instance.color     = glm::vec4(0.9f, 0.5f, 0.2f, 1.0f);
+			Fish::Renderer::Submit(instance, k_ColorCamera);
+		}
 
 		Fish::Renderer::EndScene();
 	}
@@ -182,10 +193,9 @@ private:
 	Fish::Ref<Fish::Texture2D> m_WhiteTexture;
 	std::array<uint32_t, k_BatchTextureCount> m_BatchTexIds{};
 	std::array<uint32_t, k_BatchTextureCount> m_BatchSamplerIds{};
-	Fish::Ref<Fish::VertexBuffer> m_SquareVB;
-	Fish::Ref<Fish::IndexBuffer>  m_SquareIB;
-	Fish::Ref<Fish::VertexBuffer> m_TriangleVB;
-	Fish::Ref<Fish::IndexBuffer>  m_TriangleIB;
+	Fish::MeshId m_SquareMesh   = Fish::k_InvalidMeshId;
+	Fish::MeshId m_TriangleMesh = Fish::k_InvalidMeshId;
+	Fish::SceneInstance m_ImportedScene;
 	Fish::Ref<Fish::Texture2D> m_Texture, m_LogoTexture;
 
 	Fish::OrthographicCameraController m_CameraController;

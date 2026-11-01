@@ -28,9 +28,17 @@ namespace Fish {
 
 	void Buffer::copyBuffer(const vk::raii::Buffer& srcBuffer, CommandPool& transientPool)
 	{
+		copyBuffer(srcBuffer, 0, 0, m_size, transientPool);
+	}
+
+	void Buffer::copyBuffer(const vk::raii::Buffer& srcBuffer,
+		vk::DeviceSize srcOffset, vk::DeviceSize dstOffset, vk::DeviceSize size,
+		CommandPool& transientPool)
+	{
 		vk::raii::CommandBuffer commandBuffer = beginSingleTimeCommands(m_context, transientPool);
 
-		commandBuffer.copyBuffer(srcBuffer, m_buffer, vk::BufferCopy{ .size = m_size });
+		commandBuffer.copyBuffer(srcBuffer, m_buffer,
+			vk::BufferCopy{ .srcOffset = srcOffset, .dstOffset = dstOffset, .size = size });
 
 		endSingleTimeCommands(m_context, commandBuffer);
 		// 临时命令缓冲随 transientPool 销毁时一并释放

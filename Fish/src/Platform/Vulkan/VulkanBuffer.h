@@ -21,6 +21,11 @@ namespace Fish {
 
 		void copyBuffer(const vk::raii::Buffer& srcBuffer, CommandPool& transientPool);
 
+		// 追加/扩容用:指定源和目的 buffer 内的字节偏移。
+		void copyBuffer(const vk::raii::Buffer& srcBuffer,
+			vk::DeviceSize srcOffset, vk::DeviceSize dstOffset, vk::DeviceSize size,
+			CommandPool& transientPool);
+
 		static Buffer createDeviceLocal(const void* data, vk::DeviceSize size,
 			vk::BufferUsageFlags usage, VulkanContext* context, CommandPool& transientPool);
 
