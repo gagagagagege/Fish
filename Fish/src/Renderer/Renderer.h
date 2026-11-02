@@ -5,6 +5,7 @@
 #include"Texture.h"
 #include"Instance.h"
 #include"DrawBatch.h"
+#include"Light.h"
 #include"glm/glm.hpp"
 
 #include <string>
@@ -20,6 +21,10 @@ namespace Fish {
 
 		// 键由调用方定("彩色相机"、"光源相机1")。存的是指针,相机要活得比这一帧久。
 		static void AddCamera(const std::unordered_map<std::string, Camera*>& cameras);
+
+		// 方向光跨帧保留:不调就沿用上一次的值,SceneData 里有一份默认光。
+		static void SetLight(const Light& light);
+
 		static void EndScene();
 		static void Submit(const Instance& instance, const std::string& camera);
 
@@ -49,6 +54,7 @@ namespace Fish {
 		struct SceneData
 		{
 			std::unordered_map<std::string, Camera*> Cameras;
+			Light CurrentLight;
 		};
 
 		// 找不到键时断言。Release 下断言是空的,这一条还没兜底。

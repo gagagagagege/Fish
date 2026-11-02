@@ -3,6 +3,7 @@
 #include "VertexArray.h"
 #include "Instance.h"
 #include "DrawBatch.h"
+#include "Light.h"
 
 #include <vector>
 
@@ -43,10 +44,13 @@ namespace Fish {
 		// 颜色 / 变换 / viewProjection。Submit 只入队、不碰命令缓冲,
 		// 命令缓冲只在这里开着。
 		//
+		// light 是全局方向光,跨帧保留;它不是 Instance 的属性,所以走参数而不是塞进 items。
+		//
 		// 非纯虚是为了待删的 OpenGLRendererAPI 还能实例化。
-		virtual void DrawFrame(const std::vector<RenderInstance>& items)
+		virtual void DrawFrame(const std::vector<RenderInstance>& items, const Light& light)
 		{
 			(void)items;
+			(void)light;
 		}
 
 		// 批处理那条路的提交口。和 Submit 一样只入队 —— 攒进后端持有的某个批里,

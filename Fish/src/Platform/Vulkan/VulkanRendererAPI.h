@@ -33,7 +33,7 @@ namespace Fish {
 		virtual void NotifyWindowResized() override;
 		virtual void SetClearColor(const glm::vec4& color) override;
 		virtual void WaitIdle() override;
-		virtual void DrawFrame(const std::vector<RenderInstance>& items) override;
+		virtual void DrawFrame(const std::vector<RenderInstance>& items, const Light& light) override;
 		virtual void SubmitBatch(const DrawBatch& batch) override;
 
 		// 顶点/索引追加进大 buffer,返回 mesh 表下标。去重不在这里做 —— loader 先判。

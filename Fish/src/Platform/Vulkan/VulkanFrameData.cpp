@@ -4,6 +4,8 @@
 #include "VulkanCommandPool.h"
 #include "VulkanDescriptorAllocator.h"
 
+#include "glm/gtc/matrix_inverse.hpp"
+
 #include <algorithm>
 #include <cstring>
 #include <utility>
@@ -76,7 +78,10 @@ namespace Fish {
 	uint32_t FrameData::PushObjectUbo(const glm::mat4& model, const glm::vec4& color,
 		uint32_t texId, uint32_t samplerId)
 	{
-		const ObjectUbo data{ .model = model, .color = color, .texId = texId, .samplerId = samplerId };
+		// 法线矩阵每物体每帧算一次。mat4 只是容器,shader 只用左上 3×3。
+		const glm::mat4 normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(model)));
+		const ObjectUbo data{ .model = model, .color = color, .texId = texId,
+			.samplerId = samplerId, .normalMatrix = normalMatrix };
 		memcpy(static_cast<char*>(m_uboMappedBase) + m_objectCount * m_uboStride,
 			&data, sizeof(data));
 

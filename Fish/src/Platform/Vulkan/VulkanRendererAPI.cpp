@@ -544,9 +544,10 @@ namespace Fish {
 			vk::raii::Pipeline& pipeline = m_PipelineCache->GetOrCreate(desc, shader->vertexInput());
 			commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
 
-			const PushConstants pushConstants{ .viewProj = state.viewProjection };
-			commandBuffer.pushConstants<PushConstants>(m_PipelineCache->layout(),
-				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
+			// 同上:只推 viewProj,不碰光源那一段。
+			commandBuffer.pushConstants<glm::mat4>(m_PipelineCache->layout(),
+				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0,
+				state.viewProjection);
 
 			commandBuffer.bindVertexBuffers(0, *target.buffer.getHandle(), { 0 });
 			commandBuffer.draw(vertexCount, 1, 0, 0);
@@ -558,7 +559,7 @@ namespace Fish {
 	}
 
 	//TODO: item循环里的dynamic_cast
-	void VulkanRendererAPI::DrawFrame(const std::vector<RenderInstance>& items)
+	void VulkanRendererAPI::DrawFrame(const std::vector<RenderInstance>& items, const Light& light)
 	{
 		EnsureRenderState();
 
@@ -667,6 +668,20 @@ namespace Fish {
 				m_PipelineCache->layout(), k_TextureSet, *m_TextureTableSet, nullptr);
 		}
 
+		// 光是全局量,整帧推一次。viewProj 每项推一次,写的是不重叠的另一段 ——
+		// 不能推整个 PushConstants,那会把光源那 48B 清零。
+		if (m_PipelineCache.has_value()) {
+			const LightConstants lightConstants{
+				.direction = glm::vec4(glm::normalize(light.direction), 0.0f),
+				.color     = glm::vec4(light.color, 1.0f),
+				.ambient   = glm::vec4(light.ambient, 1.0f) };
+			// stageFlags 必须覆盖 layout 里那段 range 的 stageFlags(layout 只有一段,
+			// 是 vertex|fragment),只写 fragment 会撞 01796。
+			commandBuffer.pushConstants<LightConstants>(m_PipelineCache->layout(),
+				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+				offsetof(PushConstants, light), lightConstants);
+		}
+
 		vk::Pipeline boundPipeline = nullptr;
 		bool         meshBuffersBound = false;
 
@@ -703,9 +718,10 @@ namespace Fish {
 				boundPipeline = *pipeline;
 			}
 
-			const PushConstants pushConstants{ .viewProj = item.viewProjection };
-			commandBuffer.pushConstants<PushConstants>(m_PipelineCache->layout(),
-				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushConstants);
+			// 只推 viewProj 这一段;光源在循环外已经推过,推整个结构会把它清零。
+			commandBuffer.pushConstants<glm::mat4>(m_PipelineCache->layout(),
+				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0,
+				item.viewProjection);
 
 			const uint32_t dynamicOffset = frame.PushObjectUbo(instance.transform, instance.color,
 				instance.textureSlot, instance.samplerSlot);

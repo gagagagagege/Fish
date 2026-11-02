@@ -55,6 +55,11 @@ namespace Fish {
 		s_SceneData->Cameras = cameras;
 	}
 
+	void Renderer::SetLight(const Light& light)
+	{
+		s_SceneData->CurrentLight = light;
+	}
+
 	const Camera& Renderer::GetCamera(const std::string& key)
 	{
 		const auto it = s_SceneData->Cameras.find(key);
@@ -85,7 +90,7 @@ namespace Fish {
 
 	void Renderer::DrawFrame()
 	{
-		s_RendererAPI->DrawFrame(s_DrawQueue);
+		s_RendererAPI->DrawFrame(s_DrawQueue, s_SceneData->CurrentLight);
 		s_DrawQueue.clear();
 	}
 

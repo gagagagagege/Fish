@@ -35,7 +35,8 @@ public:
 		m_FlatColorShader = Fish::Renderer::CreateShader("FlatColor", shaderDir + "flat_color.spv");
 		m_TextureShader   = Fish::Renderer::CreateShader("Texture",   shaderDir + "texture.spv");
 		m_BatchShader     = Fish::Renderer::CreateShader("Batch",     shaderDir + "batch.spv");
-		// 顶点格式统一成 pos3 + uv2 + normal3;法线这轮只存,shader 不读。
+		m_LitShader       = Fish::Renderer::CreateShader("Lit",       shaderDir + "lit.spv");
+		// 顶点格式统一成 pos3 + uv2 + normal3;lit.slang 读法线,2D 那两条不读。
 		const Fish::MeshVertex triangleVertices[3] = {
 			{ {-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f} },
 			{ { 0.5f, -0.5f, 0.0f}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f} },
@@ -65,9 +66,9 @@ public:
 		                      m_LogoTexture->GetSamplerIndex(),
 		                      m_WhiteTexture->GetSamplerIndex() };
 
-		// 导入路径的第一个测试资产:纯色 shader,不采样,textureSlot 留 0 没问题。
+		// 导入路径的第一个测试资产:光照 shader,采样白贴图,颜色仍由 Instance.color 给。
 		m_ImportedScene = Fish::ImportScene(
-			"Playground/assets/models/cube.obj", m_FlatColorShader);
+			"Playground/assets/models/cube.obj", m_LitShader);
 	}
 
 	void OnUpdate(Fish::Timestep ts)override {
@@ -133,6 +134,9 @@ public:
 			Fish::Instance instance = imported;
 			instance.transform = importTransform * instance.transform;
 			instance.color     = glm::vec4(0.9f, 0.5f, 0.2f, 1.0f);
+			// 导入器不导贴图,槽位留 0 会采到棋盘格;纯色物体按约定绑白贴图。
+			instance.textureSlot = m_WhiteTexture->GetBindlessIndex();
+			instance.samplerSlot = m_WhiteTexture->GetSamplerIndex();
 			Fish::Renderer::Submit(instance, k_ColorCamera);
 		}
 
@@ -190,6 +194,7 @@ private:
 	Fish::Ref<Fish::Shader> m_FlatColorShader;   // 零调用者了,留着没删
 	Fish::Ref<Fish::Shader> m_TextureShader;
 	Fish::Ref<Fish::Shader> m_BatchShader;
+	Fish::Ref<Fish::Shader> m_LitShader;
 	Fish::Ref<Fish::Texture2D> m_WhiteTexture;
 	std::array<uint32_t, k_BatchTextureCount> m_BatchTexIds{};
 	std::array<uint32_t, k_BatchTextureCount> m_BatchSamplerIds{};

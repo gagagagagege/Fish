@@ -1,6 +1,6 @@
 # 3D 迁移 TODO
 
-> 建立于 2026-10-28,2026-10-30 按依赖重排,2026-11-01 阶段 4 设计定稿。
+> 建立于 2026-10-28,2026-10-30 按依赖重排,2026-11-01 阶段 4 设计定稿,2026-11-02 阶段 5 完成。
 > 顺序按"一条渲染路径从 2D 到 3D 依次要解决的问题"排,原来的 L0–L6 层号不再作为顺序(对照表在最后)。
 > 状态只有三种:**已完成** / **可做**(前置都在) / **阻塞**(等某一阶段)。
 
@@ -96,7 +96,7 @@
 | 相机控制 | 照搬 UE 编辑器飞行相机的非物理分支:WASD + 右键锁光标,Space/Ctrl 上下,C/Z 改 FOV;速度写死 |
 | 网格加载器 | Assimp 走 git submodule + `add_subdirectory`,只编 GLTF/OBJ;loader 放 `Renderer/MeshImporter`,`.h` 不暴露 `ai*` 类型 |
 | 后处理开关 | `Triangulate`、`JoinIdenticalVertices`、`GenSmoothNormals`、`SortByPType`(移除点线)、`ImproveCacheLocality`;glTF/GLB 另加 `FlipUVs`,OBJ 不加 |
-| 顶点格式 | `MeshVertex` = pos3 + uv2 + normal3,32 字节,offset 0/12/20;法线本轮存进 buffer,shader 不读 |
+| 顶点格式 | `MeshVertex` = pos3 + uv2 + normal3,32 字节,offset 0/12/20;阶段 5 起 `lit.slang` 读 offset 20,2D 和批仍不读 |
 | 几何存储 | 所有 mesh 进后端大 VB/IB;`Mesh` 只存 `firstVertex`/`vertexCount`/`firstIndex`/`indexCount`/局部 AABB;不存材质、名字、哈希 |
 | 去重 | 在 loader 内完成:先按 `aiMesh` 下标复用,再内容哈希 + 逐字节比较;只覆盖一次导入;hash 不存进 Mesh |
 | Mesh/Instance | Mesh 是几何;Instance = meshId + transform + color + textureSlot + samplerSlot + shader;tiling 暂不加 |
@@ -104,6 +104,11 @@
 | 提交 | `SceneInstance` 跨帧持久,每帧循环 `Submit(instance, camera)`;loader 返回 `SceneInstance`,收一个 shader 填进每个实例 |
 | 遍历规则 | 节点矩阵连乘;每个 `aiMesh` 一个 Instance;蒙皮 mesh 跳过;缺 UV 填 (0,0);多套 UV 用第 0 套 |
 | 扩容 | Mesh 表 64 条、VB 65536 顶点、IB 131072 索引起步,均 ×1.5;旧大 buffer 延迟 `k_MaxFramesInFlight` 帧销毁 |
+| 光照空间 | 世界空间;N 由 normalMatrix 变换,L = -光传播方向 |
+| 法线矩阵 | `ObjectUbo` 末尾 `alignas(16) mat4 normalMatrix`,offset 96,总 160B;`PushObjectUbo` 内算 inverse-transpose,支持任意缩放 |
+| 光照参数 | push constant:viewProj 0–63、方向 64、颜色 80、环境光 96,共 112B;方向存传播方向,强度折进颜色 |
+| Light 类型 | `Renderer/Light.h`,三个 `vec3`;`SceneData::CurrentLight` 跨帧保留;`Renderer::SetLight`;`RendererAPI::DrawFrame(items, light)` |
+| 光照 shader | 新建 `lit.slang`(采样 + Lambert + 环境光);`texture.slang` / `flat_color.slang` / `batch.slang` 不改 |
 
 ---
 
@@ -123,7 +128,7 @@
 | # | 事项 | 状态 |
 |---|---|---|
 | 1 | 网格数据来源 | Assimp v6.0.5(子模块)+ `Renderer/MeshImporter`;`cube.obj` 已跑通 |
-| 2 | 顶点加法线 | `MeshVertex` pos3 + uv2 + normal3 = 32B 已用;shader 不读 normal,阶段 5 再接 |
+| 2 | 顶点加法线 | `MeshVertex` pos3 + uv2 + normal3 = 32B;阶段 5 起 `lit.slang` 读取 |
 | 3 | 索引位宽 | 保持 uint32 |
 | 4 | 批的顶点格式 | 保持 `BatchVertex` 48 字节,不动 |
 
@@ -132,12 +137,20 @@
 - Assimp 子模块锁在 `v6.0.5`;它会把 `CMAKE_DEBUG_POSTFIX=d` 写进全局 cache,`CMakeLists.txt` 在 `add_subdirectory` 之后强制清空,否则 `Fish.lib` 会改名 `Fishd.lib`。
 - Assimp 6 的 `aiString` 取 C 字符串是 `C_Str()`,不是 `CStr()`。
 
-## 阶段 5 · 光照 —— 阻塞(等阶段 4)
+## 阶段 5 · 光照 —— 已完成(2026-11-02)
 
-| # | 事项 | 现状 |
+| # | 事项 | 结果 |
 |---|---|---|
-| 1 | 法线矩阵 | `ObjectUbo` 只有 model/color/texId/samplerId(`VulkanFrameData.h:18-24`);加字段要同步 `texture.slang:18-22`、`flat_color.slang` 和三处 `offsetof`(`VulkanFrameData.h:26-29`) |
-| 2 | 光照 shader | 现在所有 shader 都直接输出颜色/贴图;`flat_color` 零调用者 |
+| 1 | 法线矩阵 | `ObjectUbo` 追加 `alignas(16) mat4 normalMatrix`,offset 96,总 160B;`PushObjectUbo` 内 `inverseTranspose(mat3(model))`,每物体每帧一次。C++ 端必须写 `alignas`,否则默认对齐落在 88 |
+| 2 | 光照 shader | 新建 `lit.slang`:pos+uv+normal,Lambert + 环境光 + 光色;立方体改用它 + 白贴图;2D 和批仍无光照 |
+| 3 | 光源数据 | `PushConstants` 112B:viewProj 0–63、方向 64、颜色 80、环境光 96;光每帧推一次,viewProj 每项推一次 |
+| 4 | 接口 | `Light.h`、`SceneData::CurrentLight`(跨帧保留)、`Renderer::SetLight`、`RendererAPI::DrawFrame(items, light)` |
+| 5 | 验证 | 构建 0 错误 0 警告;15 秒 stderr 0;resize 1600×900 → 1384×761(断言过尺寸变化)、最小化/还原、`WM_CLOSE` exit=0;CPU 14.89s / 墙钟 15s |
+
+已知错误与修正:
+
+- `vkCmdPushConstants` 推光源时只给 `fragment`,layout 的 range 是 `vertex|fragment` → `VUID-vkCmdPushConstants-offset-01796`。改成两个 stage 后消失。
+- 非均匀缩放的 A/B:同样 `scale(0.45, 0.225, 0.9)`,`mat3(model)` 与 inverse-transpose 两张截图立方体区域有 27,761 个像素不同,最大通道差 728。**轴对齐的面法线区分不了两种实现**;能区分的是 `GenSmoothNormals` 在共享顶点上生成的对角法线。
 
 ## 阶段 6 · 多相机与阴影 —— 阻塞(等阶段 3/4)
 
@@ -180,7 +193,15 @@
 - 导入只跑过一个没有 UV、没有法线、无骨骼的 OBJ;glTF 路径、缺 UV 分支、蒙皮跳过分支、跨 mesh 内容去重都没在运行期触发过。
 - 大 buffer 的 1.5 倍扩容 + 旧 buffer 延迟销毁分支没在运行期触发过:当前只有 3 个 mesh,远低于初始容量。
 - `DrawItem.h` 已无调用者但还没删;`CreateVertexBuffer`/`CreateIndexBuffer` 也没有调用者了。
-- 法线已经进顶点布局,但 `texture.slang` 不读;阶段 5 加光照时才验证 offset 20。
+- 法线 offset 20 只由 `lit.slang` 读取;`texture.slang` 和 `batch.slang` 仍不读。
+- 光照只有一个方向光:Lambert + 环境光,没有高光、多光源、衰减、阴影;批路径的 `BatchVertex` 48B 没有法线,仍无光照。
+- `Renderer::SetLight` 没有被 `Playground` 调用,运行期用的是 `Light` 默认值;没有 ImGui 调方向的入口。
+- 法线矩阵每物体每帧在 CPU 求逆,没有静态物体缓存;per-item 循环里的 2D 物体也算了。
+- 光照在正交相机下验证,`PerspectiveCamera` 仍未实例化。
+- 画面只由截图确认(立方体受光、A/B 有差异),真人目视和交互未做。
+- 立方体的明暗渐变来自 `GenSmoothNormals` 在 8 个共享顶点上平均法线,不是逐面法线;要逐面平直需要导入时不合并顶点或拆法线。
+- `flat_color.slang` 现在真的零调用者了,仍保留;`lit.spv` 是手工跑 `slangc` 生成的。
+- A/B 只证明两条法线路径不同,没有和逐像素参考值比对。
 - 导入只支持静态几何:蒙皮 mesh 跳过,不导入材质/贴图,`textureSlot` 留 0。
 - 大 buffer 的扩容 + 旧 buffer 延迟销毁只有设计,没跑过。
 - 跨导入去重不做;相同几何在不同文件里各占一份。
@@ -192,7 +213,7 @@
 | L0 | 已完成 · 阶段 0 |
 | L1 | 已完成 · 阶段 1 + 阶段 2 的管线部分 |
 | L2 | 已完成 · 阶段 2 |
-| L3 | 拆到阶段 3(相机接口)、阶段 5(法线)、阶段 6(多相机、阴影) |
+| L3 | 阶段 3(相机接口)、阶段 5(法线)已完成;阶段 6(多相机、阴影)未做 |
 | L4 | 阶段 4(网格、顶点、索引)+ 阶段 7(mip、上传) |
 | L5 | 阶段 3 |
 | L6 | 收尾 |
