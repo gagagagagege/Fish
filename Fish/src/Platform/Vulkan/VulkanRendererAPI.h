@@ -33,7 +33,9 @@ namespace Fish {
 		virtual void NotifyWindowResized() override;
 		virtual void SetClearColor(const glm::vec4& color) override;
 		virtual void WaitIdle() override;
-		virtual void DrawFrame(const std::vector<RenderInstance>& items, const Light& light) override;
+		virtual void DrawFrame(const std::vector<Instance>& items, const Light& light,
+			const std::vector<glm::mat4>& cameraVPs,
+			const std::array<CameraId, k_RenderPassCount>& passCameras) override;
 		virtual void SubmitBatch(const DrawBatch& batch) override;
 
 		// 顶点/索引追加进大 buffer,返回 mesh 表下标。去重不在这里做 —— loader 先判。
@@ -78,10 +80,9 @@ namespace Fish {
 
 		struct BatchState
 		{
-			std::vector<BatchVertex> vertices;                     
-			std::vector<BatchBuffer> frames;                      
-			Ref<Shader>              shader;                       
-			glm::mat4                viewProjection = glm::mat4(1.0f);
+			std::vector<BatchVertex> vertices;
+			std::vector<BatchBuffer> frames;
+			Ref<Shader>              shader;
 		};
 
 		void createInstance();
@@ -97,7 +98,7 @@ namespace Fish {
 
 		void EnsureBatchBuffer(BatchBuffer& target, uint32_t needed, uint32_t initial);
 		void EnsureTextureTable();
-		void RecordBatches(vk::raii::CommandBuffer& commandBuffer);
+		void RecordBatches(vk::raii::CommandBuffer& commandBuffer, const glm::mat4& viewProjection);
 
 		void EnsureMeshCapacity();
 		void EnsureVertexCapacity(uint32_t needed);
@@ -147,6 +148,12 @@ namespace Fish {
 		std::deque<DeferredTexture> m_DeferredTextures;
 		std::vector<uint32_t>       m_FreeImageSlots;
 		std::vector<uint32_t>       m_FreeSamplerSlots;
+
+		// 阴影图不随交换链重建。格式 D32 只有深度 aspect,barrier 不用带 stencil。
+		void              CreateShadowResources();
+		Image             m_ShadowImage;
+		vk::raii::Sampler m_ShadowSampler = nullptr;
+		Ref<Shader>       m_ShadowShader;
 
 		// 已开始的帧数。只在等过当前帧槽的 fence 之后自增。
 		uint64_t m_FrameNumber = 0;

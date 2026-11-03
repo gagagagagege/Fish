@@ -5,9 +5,26 @@
 #include "DrawBatch.h"
 #include "Light.h"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace Fish {
+	// 一帧里要录几条 pass。Main 是交换链那条,Shadow 是深度-only 那条。
+	enum class RenderPass : uint32_t
+	{
+		Main   = 0,
+		Shadow = 1,
+		Count  = 2
+	};
+
+	inline constexpr size_t k_RenderPassCount = static_cast<size_t>(RenderPass::Count);
+
+	// AddCamera 返回的下标,也是 cameraVPs 的下标。
+	using CameraId = uint32_t;
+	inline constexpr CameraId k_InvalidCameraId = ~0u;
+
 	class RendererAPI
 	{
 	public:
@@ -41,16 +58,23 @@ namespace Fish {
 		// 动态渲染下清屏是 beginRendering 的 clearValue,用 SetClearColor 的值。
 		//
 		// items 是各 layer 这一帧 Submit 攒下的,每项自带 shader / 缓冲 / 贴图 /
-		// 颜色 / 变换 / viewProjection。Submit 只入队、不碰命令缓冲,
-		// 命令缓冲只在这里开着。
+		// 颜色 / 变换。相机不在 item 上:每个 pass 用 passCameras 查到的相机,
+		// 所以同一份 items 会被录进多条 pass。
+		//
+		// cameraVPs 的下标是 CameraId;passCameras 是 pass → CameraId。
+		// 都是每帧由 Renderer 从 Camera* 数组解析出来的值。
 		//
 		// light 是全局方向光,跨帧保留;它不是 Instance 的属性,所以走参数而不是塞进 items。
 		//
 		// 非纯虚是为了待删的 OpenGLRendererAPI 还能实例化。
-		virtual void DrawFrame(const std::vector<RenderInstance>& items, const Light& light)
+		virtual void DrawFrame(const std::vector<Instance>& items, const Light& light,
+			const std::vector<glm::mat4>& cameraVPs,
+			const std::array<CameraId, k_RenderPassCount>& passCameras)
 		{
 			(void)items;
 			(void)light;
+			(void)cameraVPs;
+			(void)passCameras;
 		}
 
 		// 批处理那条路的提交口。和 Submit 一样只入队 —— 攒进后端持有的某个批里,

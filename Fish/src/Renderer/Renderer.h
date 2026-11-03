@@ -8,8 +8,8 @@
 #include"Light.h"
 #include"glm/glm.hpp"
 
+#include <array>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace Fish {
@@ -19,16 +19,20 @@ namespace Fish {
 
 		static void Shutdown();
 
-		// 键由调用方定("彩色相机"、"光源相机1")。存的是指针,相机要活得比这一帧久。
-		static void AddCamera(const std::unordered_map<std::string, Camera*>& cameras);
+		// 只登记指针,VP 在 DrawFrame 里每帧取一次。相机要活得比 DrawFrame 久。
+		// 正常情况下每个相机调一次;重复调会追加,id 不会复用。
+		static CameraId AddCamera(Camera& camera);
+
+		// 这个 pass 用哪个相机。id 是 AddCamera 的返回值。
+		static void SetPassCamera(RenderPass pass, CameraId camera);
 
 		// 方向光跨帧保留:不调就沿用上一次的值,SceneData 里有一份默认光。
 		static void SetLight(const Light& light);
 
 		static void EndScene();
-		static void Submit(const Instance& instance, const std::string& camera);
+		static void Submit(const Instance& instance);
 
-		static void BatchingSubmit(DrawBatch batch, const std::string& camera);
+		static void BatchingSubmit(DrawBatch batch);
 
 		static Ref<Shader>       CreateShader(const std::string& name, const std::string& spvPath);
 
@@ -53,18 +57,21 @@ namespace Fish {
 	private:
 		struct SceneData
 		{
-			std::unordered_map<std::string, Camera*> Cameras;
-			Light CurrentLight;
-		};
+			SceneData()
+			{
+				PassCameras.fill(k_InvalidCameraId);
+			}
 
-		// 找不到键时断言。Release 下断言是空的,这一条还没兜底。
-		static const Camera& GetCamera(const std::string& key);
+			std::vector<Camera*>                    Cameras;
+			std::array<CameraId, k_RenderPassCount> PassCameras;
+			Light                                   CurrentLight;
+		};
 
 		static SceneData* s_SceneData;
 
 		static RendererAPI* s_RendererAPI;
 
-		static std::vector<RenderInstance> s_DrawQueue;
+		static std::vector<Instance> s_DrawQueue;
 
 	};
 }

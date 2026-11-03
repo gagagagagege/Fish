@@ -95,6 +95,11 @@ namespace Fish {
 
 	bool PerspectiveCameraController::OnWindowResized(WindowResizeEvent& e)
 	{
+		// 最小化时客户区是 0×0。宽或高为 0 时算出的 aspect 是 0/NaN,
+		// glm::perspective 里有 assert(aspect != 0),Debug 下直接终止进程。
+		if (e.GetWidth() == 0 || e.GetHeight() == 0)
+			return false;
+
 		m_AspectRatio = (float)e.GetWidth() / (float)e.GetHeight();
 		m_Camera.SetProjection(m_Fov, m_AspectRatio, m_Near, m_Far);
 		return false;

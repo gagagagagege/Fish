@@ -36,11 +36,13 @@ namespace Fish {
 		float m_Near;
 		float m_Far;
 
-		PerspectiveCamera m_Camera;
-
+		// 这三个必须声明在 m_Camera 之前:构造函数用 m_Position 初始化
+		// m_Camera,而成员初始化按声明顺序走,不按初始化列表的顺序。
 		glm::vec3 m_Position{ 0.0f, 0.0f, 3.0f };
 		float m_Yaw = 0.0f;      // 度
 		float m_Pitch = 0.0f;
+
+		PerspectiveCamera m_Camera;
 
 		// 鼠标看只在按住右键时生效;按住时锁光标。
 		bool m_Looking = false;

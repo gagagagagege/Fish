@@ -96,6 +96,10 @@ namespace Fish {
 
 		const VulkanVertexInput vertexInput = BuildVertexInput(reflectedVertexInput, desc.vertexStride);
 
+		// 深度-only 的管线(阴影 pass)没有颜色附件。colorFormat 用 eUndefined
+		// 表示这一条;此时 count 必须是 0,不能传一个 Undefined 格式进去。
+		const bool hasColorAttachment = desc.colorFormat != vk::Format::eUndefined;
+
 		// pName 要的是以 '\0' 结尾的 C 串,string_view 不保证。
 		// 拷成 string 只在建新管线时走一次,不在查找路径上。
 		const std::string vertexEntry(desc.vertexEntry);
@@ -145,8 +149,8 @@ namespace Fish {
 		vk::PipelineColorBlendStateCreateInfo colorBlending{};
 		colorBlending.logicOpEnable = vk::False;
 		colorBlending.logicOp = vk::LogicOp::eCopy;
-		colorBlending.attachmentCount = 1;
-		colorBlending.pAttachments = &desc.blendState;
+		colorBlending.attachmentCount = hasColorAttachment ? 1u : 0u;
+		colorBlending.pAttachments = hasColorAttachment ? &desc.blendState : nullptr;
 
 		const std::vector<vk::DynamicState> dynamicStates = {
 			vk::DynamicState::eViewport,
@@ -163,8 +167,8 @@ namespace Fish {
 		dynamicState.pDynamicStates = dynamicStates.data();
 
 		vk::PipelineRenderingCreateInfo renderingCreateInfo{};
-		renderingCreateInfo.colorAttachmentCount = 1;
-		renderingCreateInfo.pColorAttachmentFormats = &desc.colorFormat;
+		renderingCreateInfo.colorAttachmentCount = hasColorAttachment ? 1u : 0u;
+		renderingCreateInfo.pColorAttachmentFormats = hasColorAttachment ? &desc.colorFormat : nullptr;
 		renderingCreateInfo.depthAttachmentFormat = desc.depthFormat;
 
 

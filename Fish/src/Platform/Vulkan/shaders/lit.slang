@@ -13,6 +13,7 @@ struct PushConstants {
     float4   lightDirection;  // xyz = 世界空间光传播方向,归一化
     float4   lightColor;      // rgb = 线性颜色,强度已乘
     float4   ambientColor;    // rgb = 线性环境光
+    float4x4 lightViewProj;   // 光空间的 VP,算阴影坐标用
 };
 [[vk::push_constant]] ConstantBuffer<PushConstants> pc;
 
@@ -34,19 +35,26 @@ struct VSInput {
 struct VSOutput {
     float4 pos : SV_Position;
     float2 fragTexCoord;
-    float3 fragNormal;   // 世界空间,插值后要归一化
+    float3 fragNormal;    // 世界空间,插值后要归一化
+    float4 lightClipPos;  // 光空间裁剪坐标,片元里除 w 再比较
 };
 
 // 索引来自 UBO = 非一致,必须 NonUniformResourceIndex。
 [[vk::binding(0, 1)]] Texture2D<float4> textures[];
 [[vk::binding(1, 1)]] SamplerState    samplers[];
 
+// 阴影图是全局单张,不走 bindless 表。比较采样器由硬件做 ref <= stored。
+[[vk::binding(2, 1)]] Texture2D<float>       shadowMap;
+[[vk::binding(3, 1)]] SamplerComparisonState shadowSampler;
+
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput output;
-    output.pos = mul(pc.viewProj, mul(ubo.model, float4(input.inPosition, 1.0)));
+    const float4 world = mul(ubo.model, float4(input.inPosition, 1.0));
+    output.pos = mul(pc.viewProj, world);
     output.fragTexCoord = input.inTexCoord;
     output.fragNormal = mul((float3x3)ubo.normalMatrix, input.inNormal);
+    output.lightClipPos = mul(pc.lightViewProj, world);
     return output;
 }
 
@@ -60,7 +68,20 @@ float4 fragMain(VSOutput vertIn) : SV_TARGET {
         * ubo.color;
 
     float ndotl = max(dot(N, L), 0.0);
-    float3 lit = albedo.rgb * (pc.ambientColor.rgb + pc.lightColor.rgb * ndotl);
+
+    // 光空间 NDC → 阴影图 uv。Vulkan 的视口把 NDC y=-1 放在图像第一行,
+    // 这里的 0.5*(x+1) 和它一致,不需要额外翻 y。
+    const float3 ndc = vertIn.lightClipPos.xyz / vertIn.lightClipPos.w;
+    const float2 shadowUv = ndc.xy * 0.5 + 0.5;
+
+    float shadow = 1.0;
+    if (shadowUv.x >= 0.0 && shadowUv.x <= 1.0 &&
+        shadowUv.y >= 0.0 && shadowUv.y <= 1.0 && ndc.z <= 1.0) {
+        // 减一点深度偏移:背面深度已经压掉大部分 acne,这点补剩下的。
+        shadow = shadowMap.SampleCmpLevelZero(shadowSampler, shadowUv, ndc.z - 0.002);
+    }
+
+    float3 lit = albedo.rgb * (pc.ambientColor.rgb + pc.lightColor.rgb * ndotl * shadow);
     // 光照只乘 rgb;alpha 保持贴图 × 颜色的结果。
     return float4(lit, albedo.a);
 }

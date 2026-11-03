@@ -21,7 +21,7 @@ namespace Fish {
 
 	Renderer::SceneData* Renderer::s_SceneData = new Renderer::SceneData;
 
-	std::vector<RenderInstance> Renderer::s_DrawQueue;
+	std::vector<Instance> Renderer::s_DrawQueue;
 
 	void Renderer::Init(void* nativeWindow)
 	{
@@ -50,9 +50,18 @@ namespace Fish {
 		s_SceneData = nullptr;
 	}
 
-	void Renderer::AddCamera(const std::unordered_map<std::string, Camera*>& cameras)
+	CameraId Renderer::AddCamera(Camera& camera)
 	{
-		s_SceneData->Cameras = cameras;
+		s_SceneData->Cameras.push_back(&camera);
+		return static_cast<CameraId>(s_SceneData->Cameras.size() - 1);
+	}
+
+	void Renderer::SetPassCamera(RenderPass pass, CameraId camera)
+	{
+		const size_t index = static_cast<size_t>(pass);
+		FS_CORE_ASSERT(index < k_RenderPassCount, "RenderPass 越界");
+		if (index < k_RenderPassCount)
+			s_SceneData->PassCameras[index] = camera;
 	}
 
 	void Renderer::SetLight(const Light& light)
@@ -60,26 +69,16 @@ namespace Fish {
 		s_SceneData->CurrentLight = light;
 	}
 
-	const Camera& Renderer::GetCamera(const std::string& key)
-	{
-		const auto it = s_SceneData->Cameras.find(key);
-		FS_CORE_ASSERT(it != s_SceneData->Cameras.end(), "找不到相机");
-		return *it->second;
-	}
-
 	void Renderer::EndScene()
 	{}
 
-	void Renderer::Submit(const Instance& instance, const std::string& camera)
+	void Renderer::Submit(const Instance& instance)
 	{
-		s_DrawQueue.push_back(RenderInstance{
-			.instance        = instance,
-			.viewProjection  = GetCamera(camera).GetViewProjectionMatrix() });
+		s_DrawQueue.push_back(instance);
 	}
 
-	void Renderer::BatchingSubmit(DrawBatch batch, const std::string& camera)
+	void Renderer::BatchingSubmit(DrawBatch batch)
 	{
-		batch.viewProjection = GetCamera(camera).GetViewProjectionMatrix();
 		s_RendererAPI->SubmitBatch(batch);
 	}
 
@@ -90,7 +89,15 @@ namespace Fish {
 
 	void Renderer::DrawFrame()
 	{
-		s_RendererAPI->DrawFrame(s_DrawQueue, s_SceneData->CurrentLight);
+		// 每帧解析一次。存指针而不是存矩阵,所以相机移动、resize 之后这里取到的
+		// 都是当前值;拷完这份后端就不再碰 Camera 对象。
+		std::vector<glm::mat4> cameraVPs;
+		cameraVPs.reserve(s_SceneData->Cameras.size());
+		for (const Camera* camera : s_SceneData->Cameras)
+			cameraVPs.push_back(camera->GetViewProjectionMatrix());
+
+		s_RendererAPI->DrawFrame(s_DrawQueue, s_SceneData->CurrentLight,
+			cameraVPs, s_SceneData->PassCameras);
 		s_DrawQueue.clear();
 	}
 

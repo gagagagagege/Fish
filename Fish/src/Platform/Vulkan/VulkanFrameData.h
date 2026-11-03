@@ -50,13 +50,16 @@ namespace Fish {
 
 	struct PushConstants
 	{
-		glm::mat4      viewProj;   // 0..63
-		LightConstants light;      // 64..111
+		glm::mat4      viewProj;      // 0..63   当前 pass 的相机
+		LightConstants light;         // 64..111
+		glm::mat4      lightViewProj; // 112..175 主 pass 采样阴影用
 	};
 	static_assert(offsetof(PushConstants, light) == 64, "PushConstants.light 不在 offset 64");
-	static_assert(sizeof(PushConstants) == 112, "PushConstants 不是 112 字节");
-	// 规范只保证 maxPushConstantsSize >= 128;超了要查设备
-	static_assert(sizeof(PushConstants) <= 128, "push constant 超过规范下限 128 字节");
+	static_assert(offsetof(PushConstants, lightViewProj) == 112, "PushConstants.lightViewProj 不在 offset 112");
+	static_assert(sizeof(PushConstants) == 176, "PushConstants 不是 176 字节");
+	// 规范只保证 maxPushConstantsSize >= 128;本机原生 4060 报 256,
+	// D3D12 翻译层设备只报 128 —— 那类设备上这个结构用不了。
+	static_assert(sizeof(PushConstants) <= 256, "push constant 超过 256 字节");
 
 	// 环形缓冲的起始容量
 	inline constexpr uint32_t k_InitialObjectsPerFrame = 128;

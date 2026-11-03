@@ -1,6 +1,6 @@
 # 3D 迁移 TODO
 
-> 建立于 2026-10-28,2026-10-30 按依赖重排,2026-11-01 阶段 4 设计定稿,2026-11-02 阶段 5 完成。
+> 建立于 2026-10-28,2026-10-30 按依赖重排,2026-11-01 阶段 4 设计定稿,2026-11-02 阶段 5 完成,2026-11-03 阶段 6 完成。
 > 顺序按"一条渲染路径从 2D 到 3D 依次要解决的问题"排,原来的 L0–L6 层号不再作为顺序(对照表在最后)。
 > 状态只有三种:**已完成** / **可做**(前置都在) / **阻塞**(等某一阶段)。
 
@@ -116,10 +116,10 @@
 
 | # | 事项 | 现状坐标 |
 |---|---|---|
-| 1 | ~~相机抽象~~ ✅ **已完成 2026-10-31** | `Camera` 基类 + 两个屏幕相机 + `ShadowCamera`;`AddCamera` + 提交带相机键 |
+| 1 | ~~相机抽象~~ ✅ **已完成 2026-10-31** | `Camera` 基类 + 两个屏幕相机 + `ShadowCamera`;`AddCamera` + `SetPassCamera` |
 | 2 | ~~透视投影的深度约定~~ ✅ **已完成 2026-10-31** | `GLM_FORCE_DEPTH_ZERO_TO_ONE`(PUBLIC);ortho near/far 仍是 -1/1 |
 | 3 | ~~y 翻转落点~~ ✅ **已完成 2026-10-31** | 从 ortho 参数挪到 VP 合成(`k_FlipY`);`frontFace` 不变 |
-| 4 | ~~相机控制~~ ⚠️ **代码完成 2026-10-31,未接线** | 新增 `PerspectiveCameraController`(照搬 UE 编辑器飞行相机的非物理分支)+ `Window::SetCursorLocked`;没有 layer 用它,运行期没跑过 |
+| 4 | ~~相机控制~~ ✅ **已完成并接线 2026-11-03** | `PerspectiveCameraController` 由 `Layer3D` 实例化;右键锁光标、WASD、Space/Ctrl、C/Z 改 FOV 跑过。第一次运行撞到两个 bug,见下 |
 
 ## 阶段 4 · 几何 —— 可做(第一版跑通,2026-11-01)
 
@@ -152,14 +152,44 @@
 - `vkCmdPushConstants` 推光源时只给 `fragment`,layout 的 range 是 `vertex|fragment` → `VUID-vkCmdPushConstants-offset-01796`。改成两个 stage 后消失。
 - 非均匀缩放的 A/B:同样 `scale(0.45, 0.225, 0.9)`,`mat3(model)` 与 inverse-transpose 两张截图立方体区域有 27,761 个像素不同,最大通道差 728。**轴对齐的面法线区分不了两种实现**;能区分的是 `GenSmoothNormals` 在共享顶点上生成的对角法线。
 
-## 阶段 6 · 多相机与阴影 —— 阻塞(等阶段 3/4)
+## 阶段 6 · 多相机与阴影 —— 已完成(2026-11-03)
 
-| # | 事项 | 现状 |
+| # | 事项 | 结果 |
 |---|---|---|
-| 1 | 批多相机 | 每个 shape 一个 `BatchState`,每次提交覆盖 `viewProjection`(`VulkanRendererAPI.cpp:225`),整批一次 pushConstants(`:399`);`DrawBatch.h:43` 注释说"会报",实际没有断言。**2026-10-31:`Submit` / `BatchingSubmit` 已加相机键,但批的 VP 仍是每 shape 一份 —— 加键没解决这条,等加 pass 那轮一起改。** |
-| 2 | 阴影 pass | 深度图和 `ShadowMapDesc` 已有,缺光源相机、阴影 shader、比较采样器(`compareEnable` 现在是 false,`VulkanTexture.cpp:70`) |
-| 3 | 新 descriptor binding | layout 一旦交出去就冻结(`VulkanDescriptorAllocator.cpp:26-29`),阴影 shader 必须在首帧前建 |
-| 4 | 阴影管线 | color format `Undefined`、depth format 是阴影图格式,`PipelineDesc` 的格式字段会自然分出另一条管线,不用额外改 |
+| 1 | 相机提交改成 pass 级 | `AddCamera(Camera&)` 返回 `CameraId`,返回的是 `SceneData::Cameras` 的下标;`SetPassCamera(pass, id)`;`Submit` / `BatchingSubmit` 不再带相机。`RenderInstance`、`DrawBatch::viewProjection` 删除。`Renderer::DrawFrame` 每帧把 `Camera*` 数组解析成 `cameraVPs`,和 `passCameras` 一起交给后端 |
+| 2 | 批多相机 | 批的 VP 改成 pass 级,每批 push 一次。同一 shape 用两个相机提交互相覆盖的问题消失 |
+| 3 | 阴影 pass | 2048×2048 `D32_SFLOAT` 阴影图 + 比较采样器(`compareEnable=true`、`eLessOrEqual`、clamp-to-border)。`DrawFrame` 先录深度-only 的 light pass,barrier 后录主 pass |
+| 4 | 新 descriptor binding | set 1 加 binding 2 `Texture2D<float> shadowMap`、binding 3 `SamplerComparisonState`;`lit.slang` 在构造期登记,`EnsureTextureTable` 写一次 |
+| 5 | 阴影管线 | `PipelineCache` 支持 `colorFormat = eUndefined`:`colorAttachmentCount = 0`、`colorBlending.attachmentCount = 0`。新增 `shadow.slang`(顶点 + 无输出片元) |
+| 6 | 主 pass 采样 | `lit.slang` 加 `lightViewProj`(offset 112)、世界坐标、`SampleCmpLevelZero`;`PushConstants` 112→176B |
+| 7 | 测试场景 | `Playground` 构造期注册主相机和 `ShadowCamera`;加一块接收面;2D 精灵、三角形、接收面 `castsShadow=false`;光方向 `SetLight` 和阴影相机同向 |
+
+已知错误与修正:
+
+- `VulkanPipelineCache.cpp` 里 `hasColorAttachment` 一开始声明在 `colorBlending` 之后 → C2065;挪到 `GetOrCreate` 开头。
+- `PushConstants` 的 `static_assert(sizeof <= 128)` 挡住 176B;改成 ≤256,并记录本机原生 4060 报 256、D3D12 翻译层报 128。
+- 深度-only 管线不能传 `eUndefined` 作为唯一颜色附件格式 —— `colorAttachmentCount` 必须是 0。
+
+验证:
+
+- 构建 0 错误(该 TU 没有看到警告);8–10 秒运行 stderr 0 字节,验证层 0。
+- resize 1600×900 → 1384×761(断言过客户区确实变了)、最小化/还原;`WM_CLOSE` exit=0、stderr 0。
+- 光方向 A/B:`k_LightDirection.x` 从 +0.4 改成 -0.5 后,接收面上的阴影跟着移到左侧,再改回 +0.4。
+- 截图确认阴影出现在接收面上;400 精灵约 1.30 ms/帧。
+- **画面没有真人开窗口确认过,只有截图。**
+
+## 3D layer(2026-11-03)
+
+`Playground` 现在只推 `Layer3D`,`ExampleLayer` 和 `playground2D` 删除。类名不能以数字开头,所以 C++ 类叫 `Layer3D`,`Layer("3dLayer")` 是显示名。
+
+场景:3 个 `cube.obj` 实例 + 一张 20×20 地面;透视相机默认在 `(0,0,3)` 看向 -z;地面只接收阴影,方块投影。
+
+第一次运行 `PerspectiveCameraController` 撞到两个 bug:
+
+- **成员初始化顺序**:`m_Camera` 声明在 `m_Position` 之前,构造函数用 `m_Position` 初始化 `m_Camera`,而成员按声明顺序初始化 —— 相机拿到未初始化的位置,VP 是 NaN,整屏只剩清屏色。把 `m_Position` / `m_Yaw` / `m_Pitch` 挪到 `m_Camera` 之前。
+- **最小化 0×0**:`OnWindowResized` 用 0 宽/高算 aspect,`glm::perspective` 里 `assert(aspect != 0)` 直接终止进程。宽或高为 0 时直接返回。
+
+验证:构建 0 错误;8–10 秒 stderr 0;resize 1600×900 → 1384×761、最小化/还原、`WM_CLOSE` exit=0;截图确认 3 个方块、地面和阴影。**真人开窗口和鼠标飞行没做。**
 
 ## 阶段 7 · 画质与性能 —— 可延后
 
@@ -168,7 +198,7 @@
 | 1 | mip 导入 | 需要 DDS/KTX2;`copyFrom` 只写第 0 层(`VulkanImage.h:31`) |
 | 2 | mip 生成 | blit 或 compute;本机 sRGB 无 storage |
 | 3 | 批的顶点上传 | 每帧全量 memcpy(`VulkanRendererAPI.cpp:384`) |
-| 4 | 深度图按层指定 | `VulkanImage.h:27` 的 TODO,等阴影 pass |
+| 4 | 深度图按层指定 | `VulkanImage.h:27` 的 TODO。阴影 pass 只用 layer 0,分层阴影(CSM)未做 |
 
 ## 收尾
 
@@ -177,27 +207,27 @@
 
 ## 欠账(每轮收尾更新)
 
-- 深度图已经挂到每帧渲染,但没有任何 shader 采样它(阴影 / Hi-Z 未做)。
-- `ShadowMapDesc` 的 `layerCount > 1` 没跑过。
+- 交换链深度图仍只做深度测试,没有 shader 采样它(Hi-Z 未做);阴影图已经由 `lit.slang` 采样。
+- `ShadowMapDesc` 的 `layerCount > 1` 没跑过(阴影只用 1 层)。
 - `mipLevels > 1` 没跑过,上传只写第 0 层。
 - `Image::transitionLayout` 只支持贴图上传那两条转换。
 - 画面只靠单帧截图确认过,动画和交互没测。
 - 阶段 3 #3 改完之后,画面没有真人目视(只验到稳态和边界事件)。
 - 阶段 3 #3 的 `eBack` vs `eNone` A/B 没跑。
-- `PerspectiveCamera` / `ShadowCamera` 没有被任何代码实例化,运行期没出过帧。
-- 相机键未命中在 Release 下没有兜底(`FS_CORE_ASSERT` 被编译掉)。
+- `ShadowCamera` / `PerspectiveCamera` 都已由 `Layer3D` 实例化并出帧;`PerspectiveCamera` 只在这一个场景上跑过。
+- 相机按 pass 查表的兜底:`ResolvePassVP` 在 Release 下断言被编译掉,返回单位矩阵,画面会塌成 NDC;没有“跳过这个 pass”的路径。
 - 阶段 3 #1 改完之后的画面同样没有真人目视。
-- `PerspectiveCameraController` 没有接线:光标锁定、鼠标看、移动、FOV 缩放全都没有在运行期跑过。
-- 阶段 3 的所有改动只在正交那条老路径上验过(它仍走 `OrthographicCamera`)。
+- `PerspectiveCameraController` 已接线并出帧,但只跑了默认位姿:右键锁光标、鼠标看、WASD、Space/Ctrl、C/Z 改 FOV 都没有真人操作过。
+- 阶段 3 的改动现在在正交(旧场景)和透视(`Layer3D`)两条路径上都出过帧。
 - 阶段 4 第一版已落地(2026-11-01):`MeshVertex`/`Mesh`/`Instance`/`SceneInstance`、后端大 VB/IB + mesh 表、`CreateMesh`/`Submit`、Assimp v6.0.5 + `ImportScene`。原有 2D 几何改走 meshId,新增一个 `cube.obj` 测试导入。
 - 导入只跑过一个没有 UV、没有法线、无骨骼的 OBJ;glTF 路径、缺 UV 分支、蒙皮跳过分支、跨 mesh 内容去重都没在运行期触发过。
 - 大 buffer 的 1.5 倍扩容 + 旧 buffer 延迟销毁分支没在运行期触发过:当前只有 3 个 mesh,远低于初始容量。
 - `DrawItem.h` 已无调用者但还没删;`CreateVertexBuffer`/`CreateIndexBuffer` 也没有调用者了。
 - 法线 offset 20 只由 `lit.slang` 读取;`texture.slang` 和 `batch.slang` 仍不读。
-- 光照只有一个方向光:Lambert + 环境光,没有高光、多光源、衰减、阴影;批路径的 `BatchVertex` 48B 没有法线,仍无光照。
-- `Renderer::SetLight` 没有被 `Playground` 调用,运行期用的是 `Light` 默认值;没有 ImGui 调方向的入口。
+- 光照只有一个方向光:Lambert + 环境光 + 一张阴影图,没有高光、多光源、衰减;批路径的 `BatchVertex` 48B 没有法线,仍无光照、不投影。
+- `Renderer::SetLight` 现在由 `Playground` 构造期调一次;没有 ImGui 调方向的入口,运行期改 Light 不会同步 `ShadowCamera`(`ShadowCamera` 没有 `SetTarget`)。
 - 法线矩阵每物体每帧在 CPU 求逆,没有静态物体缓存;per-item 循环里的 2D 物体也算了。
-- 光照在正交相机下验证,`PerspectiveCamera` 仍未实例化。
+- 光照现在在透视相机(`Layer3D`)下出帧;旧的正交场景已删,不再复测。
 - 画面只由截图确认(立方体受光、A/B 有差异),真人目视和交互未做。
 - 立方体的明暗渐变来自 `GenSmoothNormals` 在 8 个共享顶点上平均法线,不是逐面法线;要逐面平直需要导入时不合并顶点或拆法线。
 - `flat_color.slang` 现在真的零调用者了,仍保留;`lit.spv` 是手工跑 `slangc` 生成的。
@@ -205,6 +235,16 @@
 - 导入只支持静态几何:蒙皮 mesh 跳过,不导入材质/贴图,`textureSlot` 留 0。
 - 大 buffer 的扩容 + 旧 buffer 延迟销毁只有设计,没跑过。
 - 跨导入去重不做;相同几何在不同文件里各占一份。
+- 阴影图固定 2048×2048、只有一张;`ShadowCamera` 的位置和 halfSize 写死在 `Playground` 构造期,没有按场景 AABB 拟合。
+- 阴影比较采样器用最近邻、单 tap,没有 PCF;深度偏移是 shader 里固定的 0.002,没有 slope-scaled bias。
+- 阴影 pass 剔正面 + `frontFace = eClockwise`;开放网格(单面)不会投影,接收面 `castsShadow=false` 是靠 flag 排除的。
+- `PushConstants` 现在是 176B,要求 `maxPushConstantsSize >= 176`。本机原生 4060 报 256,D3D12 翻译层设备只报 128,那类设备上这个结构用不了。
+- `AddCamera` 只追加、不回收 id;每帧调用会让数组和 id 无限增长。`Playground` 已改成构造期调一次,`playground2D` 不再注册自己的相机(主 pass 用 `ExampleLayer` 的相机,两个控制器仍同步更新)。
+- 阴影 UV 和绕序只通过“改光方向 → 阴影跟着移动”间接验证,没有和参考图逐像素比对。
+- 阴影 pass 和主 pass 各 `PushObjectUbo` 一遍,同一物体的 `normalMatrix` 每帧被算两次;UBO 容量按 `items.size() * 2` 预留。
+- 帧时约 1.30 ms(400 精灵),上一轮记录是 1.15–1.20;场景多了阴影 pass 和接收面,不是干净 A/B。
+- `Layer3D` 替换掉两个旧 layer 之后,`BatchingSubmit` / 批处理那条路在应用层零调用者;`batch.slang`、`CreateVertexBuffer`、`CreateIndexBuffer`、`flat_color.slang` 都保留但运行期不再触发。
+- `Layer3D` 的地面是 20×20 的单 quad,场景内容写死(3 个 cube);透视相机默认 `(0,0,3)`、俯仰 0,地面在视野下半部。
 
 ## 旧层号对照
 
@@ -213,7 +253,7 @@
 | L0 | 已完成 · 阶段 0 |
 | L1 | 已完成 · 阶段 1 + 阶段 2 的管线部分 |
 | L2 | 已完成 · 阶段 2 |
-| L3 | 阶段 3(相机接口)、阶段 5(法线)已完成;阶段 6(多相机、阴影)未做 |
+| L3 | 阶段 3(相机接口)、阶段 5(法线)、阶段 6(多相机、阴影)已完成 |
 | L4 | 阶段 4(网格、顶点、索引)+ 阶段 7(mip、上传) |
 | L5 | 阶段 3 |
 | L6 | 收尾 |

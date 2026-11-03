@@ -18,18 +18,14 @@ namespace Fish {
 		glm::vec4   color       = glm::vec4(1.0f);
 		uint32_t    textureSlot = 0;   // 图像表槽位
 		uint32_t    samplerSlot = 0;   // 采样器表槽位
+		// false 的实例不进阴影 pass,主 pass 照常画。默认投影;
+		// 2D 精灵和只接收的平面要显式标 false。
+		bool        castsShadow = true;
 		Ref<Shader> shader;
 	};
 
 	struct SceneInstance
 	{
 		std::vector<Instance> instances;
-	};
-
-	// Submit 每帧入队的一项:Instance 本体 + 按相机查出来的 VP。
-	struct RenderInstance
-	{
-		Instance  instance;
-		glm::mat4 viewProjection = glm::mat4(1.0f);
 	};
 }

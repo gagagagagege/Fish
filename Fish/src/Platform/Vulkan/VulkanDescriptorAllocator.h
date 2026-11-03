@@ -19,6 +19,9 @@ namespace Fish {
 	inline constexpr uint32_t k_TextureSet       = 1;
 	inline constexpr uint32_t k_TextureImageBinding   = 0;   // Texture2D textures[]
 	inline constexpr uint32_t k_TextureSamplerBinding = 1;   // SamplerState samplers[]
+	// 阴影图不走 bindless:全局只有一张,专用 binding 写一次。
+	inline constexpr uint32_t k_ShadowImageBinding   = 2;    // Texture2D<float> shadowMap
+	inline constexpr uint32_t k_ShadowSamplerBinding = 3;    // SamplerComparisonState
 
 	// 两张表的格数上界。实际各取 min(设备 limit, 这个数),见 sampledImageTableSize()
 	// / samplerTableSize()。shader 写的是运行时数组,不带长度 —— 这些数只出现在

@@ -39,6 +39,19 @@ namespace Fish {
 		constexpr uint32_t k_InitialMeshVertices = 65536;
 		constexpr uint32_t k_InitialMeshIndices  = 131072;
 
+		constexpr uint32_t k_ShadowMapSize = 2048;
+
+		glm::mat4 ResolvePassVP(const std::vector<glm::mat4>& cameraVPs,
+			const std::array<CameraId, k_RenderPassCount>& passCameras, RenderPass pass)
+		{
+			const CameraId id = passCameras[static_cast<size_t>(pass)];
+			if (id == k_InvalidCameraId || id >= cameraVPs.size()) {
+				FS_CORE_ASSERT(false, "这个 pass 没有设置相机");
+				return glm::mat4(1.0f);
+			}
+			return cameraVPs[id];
+		}
+
 		void AppendShapeVertices(std::vector<BatchVertex>& out, const DrawBatch& batch)
 		{
 			auto emit = [&](const float local[2], const float uv[2]) {
@@ -108,6 +121,13 @@ namespace Fish {
 
 		m_Frames = Frames(k_MaxFramesInFlight, m_DeviceContext.get(), m_CommandPool);
 
+		CreateShadowResources();
+
+		// 后端自己的 shader:阴影 pass 不走应用层的材质表。必须在第一个描述符集
+		// 分配之前建 —— 它声明的 set 0 UBO 要进 layout。
+		m_ShadowShader = std::make_shared<VulkanShader>(m_DeviceContext.get(),
+			m_DescriptorAllocator, "Shadow", "Fish/src/Platform/Vulkan/shaders/shadow.spv");
+
 		// 批的顶点缓冲每帧槽一份,槽数跟着帧在飞数走。真正的 Buffer 推迟到
 		// 第一次画那个批时才建 —— 那时才知道要多大。
 		for (BatchState& batch : m_Batches) {
@@ -116,6 +136,36 @@ namespace Fish {
 
 		m_Meshes.reserve(k_InitialMeshCount);
 		m_MeshCapacity = k_InitialMeshCount;
+	}
+
+	void VulkanRendererAPI::CreateShadowResources()
+	{
+		m_ShadowImage = Image(ShadowMapDesc{
+			.extent     = ImageExtent{ k_ShadowMapSize, k_ShadowMapSize },
+			.format     = ShadowFormat::D32_SFLOAT,
+			.layerCount = 1 }, m_DeviceContext.get());
+
+		// 比较采样器:硬件做 ref <= stored 的比较。D32 的线性过滤支持要看设备,
+		// 先按最近邻走;要做 PCF 再查 sampledImageLinearFilter 换 eLinear。
+		const vk::SamplerCreateInfo samplerInfo{
+			.magFilter               = vk::Filter::eNearest,
+			.minFilter               = vk::Filter::eNearest,
+			.mipmapMode              = vk::SamplerMipmapMode::eNearest,
+			.addressModeU            = vk::SamplerAddressMode::eClampToBorder,
+			.addressModeV            = vk::SamplerAddressMode::eClampToBorder,
+			.addressModeW            = vk::SamplerAddressMode::eClampToBorder,
+			.mipLodBias              = 0.0f,
+			.anisotropyEnable        = vk::False,
+			.maxAnisotropy           = 1.0f,
+			.compareEnable           = vk::True,
+			.compareOp               = vk::CompareOp::eLessOrEqual,
+			.minLod                  = 0.0f,
+			.maxLod                  = 0.0f,
+			// 视锥外的坐标当"没被遮挡",否则视锥边缘会拉出一条黑边。
+			.borderColor             = vk::BorderColor::eFloatOpaqueWhite,
+			.unnormalizedCoordinates = vk::False
+		};
+		m_ShadowSampler = vk::raii::Sampler(m_DeviceContext->device, samplerInfo);
 	}
 
 	// 发号优先用回收回来的,没有才往上加。两个表各管各的。
@@ -226,11 +276,6 @@ namespace Fish {
 		else {
 			FS_CORE_ASSERT(state.shader == batch.shader, "同一个批里两个 shader");
 		}
-
-		// 每次提交都重记。viewProjection 是"这一帧用哪个相机",不是"这个批永远用
-		// 哪个相机" —— 只在第一次赋值会让整个批冻在第一帧的相机上,而 resize 和
-		// 最小化都会重算相机的投影矩阵,之后批里的顶点还是按老矩阵变换。
-		state.viewProjection = batch.viewProjection;
 
 		AppendShapeVertices(state.vertices, batch);
 	}
@@ -409,6 +454,17 @@ namespace Fish {
 			k_TextureImageBinding, 0, m_ImageInfos);
 		m_DescriptorAllocator.writeSamplers(m_TextureTableSet,
 			k_TextureSamplerBinding, 0, m_SamplerInfos);
+
+		// 阴影图是全局单张,不走发号。主 pass 只在它处于 ShaderReadOnly 时采样。
+		FS_CORE_ASSERT(m_ShadowSampler != nullptr, "阴影资源还没建");
+		const vk::DescriptorImageInfo shadowImageInfo{
+			.imageView   = *m_ShadowImage.getView(),
+			.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+		const vk::DescriptorImageInfo shadowSamplerInfo{ .sampler = *m_ShadowSampler };
+		m_DescriptorAllocator.writeSampledImages(m_TextureTableSet,
+			k_ShadowImageBinding, 0, { shadowImageInfo });
+		m_DescriptorAllocator.writeSamplers(m_TextureTableSet,
+			k_ShadowSamplerBinding, 0, { shadowSamplerInfo });
 	}
 
 	// 管线缓存、贴图 set 缓存和每个帧槽的描述符集都推迟到这里 —— 它们都依赖
@@ -498,7 +554,8 @@ namespace Fish {
 	}
 
 	// 批处理段:每个批一次管线绑定 + 一次 pushConstants + 一次 draw,没有逐项循环。
-	void VulkanRendererAPI::RecordBatches(vk::raii::CommandBuffer& commandBuffer)
+	void VulkanRendererAPI::RecordBatches(vk::raii::CommandBuffer& commandBuffer,
+		const glm::mat4& viewProjection)
 	{
 		if (!m_PipelineCache.has_value()) {
 			// 一个 shader 都没建过(EnsureRenderState 提前返回了)。数据是这一帧的,
@@ -547,7 +604,7 @@ namespace Fish {
 			// 同上:只推 viewProj,不碰光源那一段。
 			commandBuffer.pushConstants<glm::mat4>(m_PipelineCache->layout(),
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0,
-				state.viewProjection);
+				viewProjection);
 
 			commandBuffer.bindVertexBuffers(0, *target.buffer.getHandle(), { 0 });
 			commandBuffer.draw(vertexCount, 1, 0, 0);
@@ -559,9 +616,14 @@ namespace Fish {
 	}
 
 	//TODO: item循环里的dynamic_cast
-	void VulkanRendererAPI::DrawFrame(const std::vector<RenderInstance>& items, const Light& light)
+	void VulkanRendererAPI::DrawFrame(const std::vector<Instance>& items, const Light& light,
+		const std::vector<glm::mat4>& cameraVPs,
+		const std::array<CameraId, k_RenderPassCount>& passCameras)
 	{
 		EnsureRenderState();
+
+		const glm::mat4 mainVP   = ResolvePassVP(cameraVPs, passCameras, RenderPass::Main);
+		const glm::mat4 shadowVP = ResolvePassVP(cameraVPs, passCameras, RenderPass::Shadow);
 
 		if (m_FramebufferResized) {
 			m_FramebufferResized = false;
@@ -579,7 +641,8 @@ namespace Fish {
 		ReclaimTextures();
 		ReclaimBuffers();
 
-		frame.EnsureUboCapacity(m_DescriptorAllocator, static_cast<uint32_t>(items.size()));
+		// 阴影 pass 和主 pass 各推一遍逐物体数据,所以按两倍预留。
+		frame.EnsureUboCapacity(m_DescriptorAllocator, static_cast<uint32_t>(items.size() * 2));
 
 		auto [result, imageIndex] = m_SwapChain.handle().acquireNextImage(
 			UINT64_MAX, *frame.presentCompleteSemaphore(), nullptr);
@@ -597,6 +660,115 @@ namespace Fish {
 		vk::raii::CommandBuffer& commandBuffer = frame.commandBuffer();
 		commandBuffer.reset();
 		commandBuffer.begin(vk::CommandBufferBeginInfo{});
+
+		// 环形缓冲的写游标归零。放在两条 pass 之前是安全的:到这个点已经等过
+		// 这个帧槽的 fence,GPU 不再读它那块 UBO 了。
+		frame.ResetObjects();
+
+		// ---- 阴影 pass:从光源看一遍,只写深度 ----
+		{
+			auto shadowShader = std::dynamic_pointer_cast<VulkanShader>(m_ShadowShader);
+			FS_CORE_ASSERT(shadowShader, "阴影 shader 不是 Vulkan 的");
+
+			// oldLayout 用 Undefined:上一轮结束在 ShaderReadOnly,但内容反正要清,
+			// 不需要跨帧记布局。
+			transitionSwapImage(commandBuffer, *m_ShadowImage.getHandle(),
+				vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal,
+				vk::AccessFlagBits::eNone, vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+				vk::PipelineStageFlagBits::eTopOfPipe,
+				vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+				vk::ImageAspectFlagBits::eDepth);
+
+			vk::RenderingAttachmentInfo shadowDepth{};
+			shadowDepth.imageView = *m_ShadowImage.getView();
+			shadowDepth.imageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+			shadowDepth.loadOp = vk::AttachmentLoadOp::eClear;
+			shadowDepth.storeOp = vk::AttachmentStoreOp::eStore;
+			shadowDepth.clearValue = vk::ClearDepthStencilValue(1.0f, 0);
+
+			vk::RenderingInfo shadowRendering{};
+			shadowRendering.renderArea = vk::Rect2D{ vk::Offset2D{ 0, 0 },
+				vk::Extent2D{ k_ShadowMapSize, k_ShadowMapSize } };
+			shadowRendering.layerCount = 1;
+			shadowRendering.colorAttachmentCount = 0;
+			shadowRendering.pColorAttachments = nullptr;
+			shadowRendering.pDepthAttachment = &shadowDepth;
+
+			commandBuffer.beginRendering(shadowRendering);
+
+			vk::Viewport shadowViewport{ 0.0f, 0.0f,
+				static_cast<float>(k_ShadowMapSize), static_cast<float>(k_ShadowMapSize), 0.0f, 1.0f };
+			commandBuffer.setViewport(0, shadowViewport);
+			commandBuffer.setScissor(0, vk::Rect2D{ vk::Offset2D{ 0, 0 },
+				vk::Extent2D{ k_ShadowMapSize, k_ShadowMapSize } });
+
+			// 阴影相机不乘 k_FlipY,Vulkan 的 y 向下把绕序翻了一次 —— 主 pass 的
+			// 正面在这里是 CW。剔正面,写进深度的是背面,压掉大部分自阴影。
+			commandBuffer.setCullMode(vk::CullModeFlagBits::eFront);
+			commandBuffer.setFrontFace(vk::FrontFace::eClockwise);
+			commandBuffer.setPolygonModeEXT(vk::PolygonMode::eFill);
+			commandBuffer.setLineWidth(1.0f);
+			commandBuffer.setDepthTestEnable(vk::True);
+			commandBuffer.setDepthWriteEnable(vk::True);
+
+			commandBuffer.pushConstants<glm::mat4>(m_PipelineCache->layout(),
+				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, shadowVP);
+
+			const PipelineDesc shadowDesc{
+				.vertexModule   = shadowShader->module(),
+				.fragmentModule = shadowShader->module(),
+				.vertexEntry    = shadowShader->vertexEntry(),
+				.fragmentEntry  = shadowShader->fragmentEntry(),
+				.vertexStride   = k_MeshVertexStride,
+				.colorFormat    = vk::Format::eUndefined,
+				.depthFormat    = m_ShadowImage.getFormat()
+			};
+			vk::raii::Pipeline& shadowPipeline =
+				m_PipelineCache->GetOrCreate(shadowDesc, shadowShader->vertexInput());
+			commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, *shadowPipeline);
+
+			// set 1(阴影图)在这个 pass 里用不到,不绑;set 0 逐物体换 dynamic offset。
+			bool shadowBuffersBound = false;
+			for (const Instance& instance : items) {
+				if (!instance.castsShadow)
+					continue;
+				if (instance.meshId >= m_Meshes.size()) {
+					FS_CORE_ASSERT(false, "Instance.meshId 超出 mesh 表");
+					continue;
+				}
+				const Mesh& mesh = m_Meshes[instance.meshId];
+
+				const uint32_t dynamicOffset = frame.PushObjectUbo(instance.transform,
+					instance.color, instance.textureSlot, instance.samplerSlot);
+				commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+					m_PipelineCache->layout(), k_ObjectUboSet, *frame.descriptorSet(), dynamicOffset);
+
+				if (!shadowBuffersBound) {
+					commandBuffer.bindVertexBuffers(0, *m_MeshVertexBuffer.getHandle(), { 0 });
+					commandBuffer.bindIndexBuffer(*m_MeshIndexBuffer.getHandle(), 0,
+						vk::IndexType::eUint32);
+					shadowBuffersBound = true;
+				}
+
+				if (mesh.indexCount > 0) {
+					commandBuffer.drawIndexed(mesh.indexCount, 1, mesh.firstIndex,
+						static_cast<int32_t>(mesh.firstVertex), 0);
+				}
+				else {
+					commandBuffer.draw(mesh.vertexCount, 1, mesh.firstVertex, 0);
+				}
+			}
+
+			commandBuffer.endRendering();
+
+			// 主 pass 要从片元着色器采样这张图,写完才能读。
+			transitionSwapImage(commandBuffer, *m_ShadowImage.getHandle(),
+				vk::ImageLayout::eDepthAttachmentOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+				vk::AccessFlagBits::eDepthStencilAttachmentWrite, vk::AccessFlagBits::eShaderRead,
+				vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+				vk::PipelineStageFlagBits::eFragmentShader,
+				vk::ImageAspectFlagBits::eDepth);
+		}
 
 		// oldLayout 用 Undefined,含义是"上一帧画了什么不管",所以不用记住它原来的布局。
 		transitionSwapImage(commandBuffer, m_SwapChain.images()[imageIndex],
@@ -668,8 +840,9 @@ namespace Fish {
 				m_PipelineCache->layout(), k_TextureSet, *m_TextureTableSet, nullptr);
 		}
 
-		// 光是全局量,整帧推一次。viewProj 每项推一次,写的是不重叠的另一段 ——
-		// 不能推整个 PushConstants,那会把光源那 48B 清零。
+		// 光是全局量,整帧推一次。viewProj 现在也是每 pass 一次 —— 相机不再跟着
+		// item 走。光源和 lightViewProj 各推自己那一段,不能推整个结构,
+		// 否则会把别的段清零。
 		if (m_PipelineCache.has_value()) {
 			const LightConstants lightConstants{
 				.direction = glm::vec4(glm::normalize(light.direction), 0.0f),
@@ -680,18 +853,18 @@ namespace Fish {
 			commandBuffer.pushConstants<LightConstants>(m_PipelineCache->layout(),
 				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
 				offsetof(PushConstants, light), lightConstants);
+
+			commandBuffer.pushConstants<glm::mat4>(m_PipelineCache->layout(),
+				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, mainVP);
+			commandBuffer.pushConstants<glm::mat4>(m_PipelineCache->layout(),
+				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+				offsetof(PushConstants, lightViewProj), shadowVP);
 		}
 
 		vk::Pipeline boundPipeline = nullptr;
 		bool         meshBuffersBound = false;
 
-		// 环形缓冲的写游标归零。放在这儿而不是帧开头是安全的:到这个点已经
-		// 等过这个帧槽的 fence,GPU 不再读它那块 UBO 了。
-		frame.ResetObjects();
-
-		for (const RenderInstance& item : items) {
-			const Instance& instance = item.instance;
-
+		for (const Instance& instance : items) {
 			auto shader = std::dynamic_pointer_cast<VulkanShader>(instance.shader);
 			FS_CORE_ASSERT(shader, "Instance.shader 不是 Vulkan 的");
 			if (!shader)
@@ -718,11 +891,6 @@ namespace Fish {
 				boundPipeline = *pipeline;
 			}
 
-			// 只推 viewProj 这一段;光源在循环外已经推过,推整个结构会把它清零。
-			commandBuffer.pushConstants<glm::mat4>(m_PipelineCache->layout(),
-				vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0,
-				item.viewProjection);
-
 			const uint32_t dynamicOffset = frame.PushObjectUbo(instance.transform, instance.color,
 				instance.textureSlot, instance.samplerSlot);
 			commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
@@ -746,7 +914,7 @@ namespace Fish {
 		}
 
 		// 批在 per-item 之后画。两条路并存,顺序是定死的:批里的东西盖在上面。
-		RecordBatches(commandBuffer);
+		RecordBatches(commandBuffer, mainVP);
 
 		commandBuffer.endRendering();
 

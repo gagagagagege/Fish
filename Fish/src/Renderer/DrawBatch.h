@@ -40,7 +40,7 @@ namespace Fish {
 	static_assert(offsetof(BatchVertex, samplerId) == 40, "samplerId 不在 offset 40");
 	static_assert(offsetof(BatchVertex, tilingFactor) == 44, "tilingFactor 不在 offset 44");
 
-	//批的key里面没有viewProjection,两个layer viewProjection不同时会报
+	// VP 不在批里:批在哪个 pass 录,就用那个 pass 的相机。
 	struct DrawBatch
 	{
 		BatchShape  shape;
@@ -50,6 +50,5 @@ namespace Fish {
 		uint32_t    texId = 0;
 		uint32_t    samplerId = 0;
 		float       tilingFactor = 1.0f;
-		glm::mat4   viewProjection = glm::mat4(1.0f);
 	};
 }
